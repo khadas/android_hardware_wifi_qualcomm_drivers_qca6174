@@ -6,8 +6,14 @@ export BACKPORT_PWD=$(shell pwd)/backports
 # different customer want to use different wpa_supplicant
 # in board_type config file, we can override it
 export WPA_SUPPLICANT_TOPDIR=${ATH_TOPDIR}/apps/wpa_supplicant_8
+ifeq (${KERNELPATH}, )
+export KERNELPATH=/mnt/nfsroot/weiguang.ruan/android5.1/out/target/product/p201/obj/KERNEL_OBJ/
+else
+$(info KERNELPATH=${KERNELPATH})
+export KERNELPATH
+endif
 
-include ./env.makefile
+include $(ATH_TOPDIR)/build/env.makefile
 include scripts/${BOARD_TYPE}/config.${BOARD_TYPE}
 include scripts/${BOARD_TYPE}/Makefile.${BOARD_TYPE}
 ifneq ($(wildcard scripts/${BOARD_TYPE}/Makefile.${BLUETOOTHSTACK}), )
@@ -47,7 +53,7 @@ export FW_WLAN_NAME=qcacld-new
 export CFG80211_NAME=backports
 
 #################################################################################################################################
-clean: hostapd_clean wpa_supplicant_clean drivers_clean rootfs_clean
+clean: drivers_clean rootfs_clean
 
 #
 # rootfs build
