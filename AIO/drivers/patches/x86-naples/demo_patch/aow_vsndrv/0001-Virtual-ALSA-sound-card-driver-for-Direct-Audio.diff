@@ -1,0 +1,1526 @@
+diff -urN a/aowvsndcard.c b/aowvsndcard.c
+--- a/aowvsndcard.c	1970-01-01 08:00:00.000000000 +0800
++++ b/aowvsndcard.c	2015-12-11 10:21:44.697143513 +0800
+@@ -0,0 +1,1499 @@
++/*
++ *  Dummy soundcard
++ *  Copyright (c) by Jaroslav Kysela <perex@perex.cz>
++ *
++ *   This program is free software; you can redistribute it and/or modify
++ *   it under the terms of the GNU General Public License as published by
++ *   the Free Software Foundation; either version 2 of the License, or
++ *   (at your option) any later version.
++ *
++ *   This program is distributed in the hope that it will be useful,
++ *   but WITHOUT ANY WARRANTY; without even the implied warranty of
++ *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ *   GNU General Public License for more details.
++ *
++ *   You should have received a copy of the GNU General Public License
++ *   along with this program; if not, write to the Free Software
++ *   Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
++ *
++ */
++#include <linux/init.h>
++#include <linux/version.h>
++#include <linux/err.h>
++#include <linux/platform_device.h>
++#include <linux/jiffies.h>
++#include <linux/slab.h>
++#include <linux/time.h>
++#include <linux/wait.h>
++#include <linux/hrtimer.h>
++#include <linux/math64.h>
++#include <linux/moduleparam.h>
++#include <sound/core.h>
++#include <sound/control.h>
++#include <sound/tlv.h>
++#include <sound/pcm.h>
++#include <sound/rawmidi.h>
++#include <sound/info.h>
++#include <sound/initval.h>
++#include <linux/module.h>
++#include <linux/fs.h>
++#include <linux/etherdevice.h>
++#include <linux/proc_fs.h>
++#define CONFIG_ATHEROS_AOW 1
++//#define SUPPORT_MCK
++
++spinlock_t dslock;
++
++#define PROCFS_DIR		"aow"
++#define PROCFS_NAME 	"aowengine"
++#define PROCFS_PEERMAC	"aowpeer"
++
++enum AOWENGINE{
++	AOW_TF_ENG,
++#ifdef SUPPORT_MCK
++	AOW_MCK_ENG
++#endif
++};
++static u8 peermac[6];
++
++#ifdef SUPPORT_MCK
++extern void SDA_setSharedMemory4Send(unsigned int BufferId, unsigned char *pBufferTotal, unsigned int BufferTotalSize, unsigned int BufferUnitSize, unsigned int HeadroomSize);
++extern void SDA_function4Send(unsigned int BufferId, unsigned char *pBuffer, unsigned int BufferSize);
++extern void SDA_GetTSF(unsigned int *pTsf);
++#endif
++
++extern void SDA_CLD_setSharedMemory4Send(unsigned int BufferId, unsigned char *pBufferTotal, unsigned int BufferTotalSize, unsigned int BufferUnitSize, unsigned int HeadroomSize);
++extern void SDA_CLD_function4Send(unsigned int BufferId, unsigned char *pBuffer, unsigned int BufferSize);
++//extern void SDA_CLD_GetTSF(unsigned int *pTsf);
++
++void (*setSharedMemory4Send)(unsigned int BufferId, unsigned char *pBufferTotal, unsigned int BufferTotalSize, unsigned int BufferUnitSize, unsigned int HeadroomSize);
++void (*function4Send)(unsigned int BufferId, unsigned char *pBuffer, unsigned int BufferSize);
++//void (*GetTSF)(unsigned int *pTsf);
++static struct proc_dir_entry *proc_peermac, *proc_file, *proc_dir;
++static int aowengine = AOW_TF_ENG;
++
++void setaowenging(int aowenging)
++{
++
++	spin_lock(&dslock);
++#if (CONFIG_ATHEROS_AOW == 1)
++#if (!defined FILE_DEBUG) && (!defined UDPDBG)
++	if (aowengine == AOW_TF_ENG) {
++		setSharedMemory4Send = SDA_CLD_setSharedMemory4Send;
++		function4Send = SDA_CLD_function4Send;
++	//	GetTSF = SDA_CLD_GetTSF;
++	}
++#ifdef SUPPORT_MCK
++	else if (aowengine == AOW_MCK_ENG) {
++		setSharedMemory4Send = SDA_setSharedMemory4Send;
++		function4Send = SDA_function4Send;
++	//	GetTSF = SDA_GetTSF;
++	}
++#else
++	else {
++		setSharedMemory4Send = SDA_CLD_setSharedMemory4Send;
++		function4Send = SDA_CLD_function4Send;
++	//	GetTSF = SDA_CLD_GetTSF;
++	}
++#endif
++#endif
++#endif
++	spin_unlock(&dslock);
++}
++
++
++static ssize_t aow_read(struct file *file, char __user *user_buf,
++					size_t count, loff_t *ppos)
++{
++	char buf[32];
++	int len;
++	len = snprintf(buf, sizeof(buf), "AOW Engine : %s\n", aowengine == AOW_TF_ENG ? "TF" : "MCK");
++	return simple_read_from_buffer(user_buf, count, ppos, buf, len);
++}
++
++static ssize_t aow_write(struct file *file, const char __user *user_buf,
++					size_t count, loff_t *ppos)
++{
++	u32 tmp,len;
++	char buf[32];
++
++	len = min(count, sizeof(buf) - 1);
++	if (copy_from_user(buf, user_buf, len))
++		return -EFAULT;
++	buf[len] = '\0';
++	if (kstrtou32(buf, 0, &tmp))
++		return -EINVAL;
++	if (tmp == 0) {//using TF
++		aowengine = AOW_TF_ENG;
++	}
++#ifdef SUPPORT_MCK
++	else if (tmp == 1) {//using MCK
++		aowengine = AOW_MCK_ENG;
++	}
++#else
++	else aowengine = AOW_TF_ENG;
++#endif
++	setaowenging(aowengine);
++	return count;
++}
++
++static const struct file_operations aow_fops = {
++	.read = aow_read,
++	.write = aow_write,
++};
++
++
++static ssize_t peermac_read(struct file *file, char __user *user_buf,
++					size_t count, loff_t *ppos)
++{
++	char buf[48];
++	int len;
++	len = snprintf(buf, sizeof(buf), "AOW PeerMac : %pM\n", peermac);
++	return simple_read_from_buffer(user_buf, count, ppos, buf, len);
++}
++
++static ssize_t peermac_write(struct file *file, const char __user *user_buf,
++					size_t count, loff_t *ppos)
++{
++	u32 len;
++	char buf[64];
++	int addr[6];
++	int i;
++	len = min(count, sizeof(buf) - 1);
++	if (copy_from_user(buf, user_buf, len))
++		return -EFAULT;
++	sscanf(buf, "%02x:%02x:%02x:%02x:%02x:%02x",
++		   &addr[0], &addr[1], &addr[2], &addr[3], &addr[4], &addr[5]);
++	for (i = 0; i < ETH_ALEN; i++)
++		peermac[i] = (u8)addr[i];
++	return count;
++}
++
++static const struct file_operations peermac_fops = {
++	.read = peermac_read,
++	.write = peermac_write,
++};
++
++
++#ifdef UDPDBG
++#include <linux/netdevice.h>
++#include <linux/ip.h>
++#include <linux/in.h>
++#include <linux/delay.h>
++#define CONNECT_PORT 0x43ff
++#define INADDR_SEND ((unsigned long int)0x7f000001) /* local addr 127.0.0.1 */
++struct socket *sock_send;
++struct sockaddr_in addr_send;
++
++int ksocket_send(unsigned char *buf, int len)
++{
++        struct msghdr msg;
++        struct iovec iov;
++        mm_segment_t oldfs;
++        int size = 0;
++
++        if (sock_send->sk==NULL) {
++			printk("invalid socket\n");
++			return 0;
++		}
++
++        iov.iov_base = buf;
++        iov.iov_len = len;
++
++        msg.msg_flags = MSG_DONTWAIT;
++        msg.msg_name = &addr_send;
++        msg.msg_namelen  = sizeof(struct sockaddr_in);
++        msg.msg_control = NULL;
++        msg.msg_controllen = 0;
++        msg.msg_iov = &iov;
++        msg.msg_iovlen = 1;
++        msg.msg_control = NULL;
++
++        oldfs = get_fs();
++        set_fs(KERNEL_DS);
++        size = sock_sendmsg(sock_send,&msg,len);
++        set_fs(oldfs);
++
++        return size;
++}
++#endif
++
++MODULE_AUTHOR("Jaroslav Kysela <perex@perex.cz>");
++MODULE_DESCRIPTION("AOW Dummy soundcard (/dev/null)");
++MODULE_LICENSE("GPL");
++MODULE_SUPPORTED_DEVICE("{{ALSA,Dummy soundcard}}");
++
++#define __devinit
++#define __devexit
++#define __devexit_p
++
++
++#ifdef FILE_DEBUG
++#define DBG_FILE_PATH "/tmp/aowpipe"
++struct file *debug_fp = NULL;
++void opendbgfile(void)
++{
++	if(!debug_fp)
++		debug_fp = filp_open((const char *)DBG_FILE_PATH, O_WRONLY, 0666);
++}
++
++int writefile(u8* buf, int len)
++{
++	mm_segment_t pre_fd;
++	int filelen = 0;
++
++	pre_fd = get_fs();
++	set_fs(KERNEL_DS);
++	if (debug_fp && !IS_ERR(debug_fp))	{
++		if (debug_fp->f_op && debug_fp->f_op->write)	{
++			debug_fp->f_op->write(debug_fp, buf, len, &debug_fp->f_pos);
++			filelen = debug_fp->f_dentry->d_inode->i_size;
++		}
++	}
++	set_fs(pre_fd);
++	return filelen;
++}
++
++void closedbgfile(void)
++{
++	if (debug_fp && !IS_ERR(debug_fp))
++		filp_close(debug_fp, 0);
++	else
++		printk("close err %d\n", debug_fp);
++	debug_fp = 0;
++}
++
++#endif
++
++#define MAX_PCM_DEVICES		4
++#define MAX_PCM_SUBSTREAMS	128
++#define MAX_MIDI_DEVICES	2
++
++#if (CONFIG_ATHEROS_AOW == 1)
++
++#define MAX_BUF_SIZE 36//1496
++#define DIRECT_AUDIO_LLC_TYPE 0x43FF
++
++typedef struct SDA_Descriptor
++{
++	unsigned char m_ReadyToCopy;
++	unsigned int m_PayloadSize;
++	unsigned int m_TimeStamp;
++}__attribute__((packed)) SDA_Descriptor_t;
++
++
++typedef struct SDA_HeadRoom
++{
++	unsigned char m_DestAddress[6];
++	unsigned char m_SourceAddress[6];
++	unsigned short m_PacketType;
++}__attribute__((packed)) SDA_HeadRoom_t;
++
++
++typedef struct
++{
++	SDA_Descriptor_t   m_Descriptor;
++	unsigned char m_Dummy[50 - sizeof(struct SDA_HeadRoom)];
++	SDA_HeadRoom_t  m_Headroom;
++}__attribute__((packed)) SDA_Header_t;
++
++
++
++
++
++int aud_channels = 0;
++#endif
++
++/* defaults */
++#if (CONFIG_ATHEROS_AOW == 1)
++#define MAX_BUFFER_SIZE		(8*1024)
++#define MAX_PERIOD_SIZE		MAX_BUFFER_SIZE
++#define USE_FORMATS 		SNDRV_PCM_FMTBIT_S16_LE
++#define USE_RATE		    SNDRV_PCM_RATE_48000
++#define USE_RATE_MIN		48000
++#define USE_RATE_MAX		48000
++#define USE_CHANNELS_MIN 	1
++#define USE_CHANNELS_MAX 	8
++#define USE_PERIODS_MIN 	1
++#define USE_PERIODS_MAX 	1024
++#define add_playback_constraints(x) 0
++#define add_capture_constraints(x) 0
++#else /* CONFIG_ATHEROS_AOW */
++#ifndef MAX_BUFFER_SIZE
++#define MAX_BUFFER_SIZE		(8*1024)
++#endif
++#ifndef MAX_PERIOD_SIZE
++#define MAX_PERIOD_SIZE		MAX_BUFFER_SIZE
++#endif
++#ifndef USE_FORMATS
++#define USE_FORMATS 		(SNDRV_PCM_FMTBIT_U8 | SNDRV_PCM_FMTBIT_S16_LE)
++#endif
++#ifndef USE_RATE
++#define USE_RATE		SNDRV_PCM_RATE_CONTINUOUS | SNDRV_PCM_RATE_8000_48000
++#define USE_RATE_MIN		5500
++#define USE_RATE_MAX		48000
++#endif
++#ifndef USE_CHANNELS_MIN
++#define USE_CHANNELS_MIN 	1
++#endif
++#ifndef USE_CHANNELS_MAX
++#define USE_CHANNELS_MAX 	2
++#endif
++#ifndef USE_PERIODS_MIN
++#define USE_PERIODS_MIN 	1
++#endif
++#ifndef USE_PERIODS_MAX
++#define USE_PERIODS_MAX 	1024
++#endif
++#ifndef add_playback_constraints
++#define add_playback_constraints(x) 0
++#endif
++#ifndef add_capture_constraints
++#define add_capture_constraints(x) 0
++#endif
++
++#endif
++
++static int index[SNDRV_CARDS] = SNDRV_DEFAULT_IDX;	/* Index 0-MAX */
++static char *id[SNDRV_CARDS] = SNDRV_DEFAULT_STR;	/* ID for this card */
++static int enable[SNDRV_CARDS] = {1, [1 ... (SNDRV_CARDS - 1)] = 0};
++static int pcm_devs[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS - 1)] = 1};
++static int pcm_substreams[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS - 1)] = 8};
++//static int midi_devs[SNDRV_CARDS] = {[0 ... (SNDRV_CARDS - 1)] = 2};
++#ifdef CONFIG_HIGH_RES_TIMERS
++static int hrtimer = 1;
++#endif
++static int fake_buffer = 1;
++
++module_param_array(index, int, NULL, 0444);
++MODULE_PARM_DESC(index, "Index value for dummy soundcard.");
++module_param_array(id, charp, NULL, 0444);
++MODULE_PARM_DESC(id, "ID string for dummy soundcard.");
++module_param_array(enable, int, NULL, 0444);
++MODULE_PARM_DESC(enable, "Enable this dummy soundcard.");
++module_param_array(pcm_devs, int, NULL, 0444);
++MODULE_PARM_DESC(pcm_devs, "PCM devices # (0-4) for dummy driver.");
++module_param_array(pcm_substreams, int, NULL, 0444);
++MODULE_PARM_DESC(pcm_substreams, "PCM substreams # (1-128) for dummy driver.");
++module_param(fake_buffer, int, 0444);
++MODULE_PARM_DESC(fake_buffer, "Fake buffer allocations.");
++#ifdef CONFIG_HIGH_RES_TIMERS
++module_param(hrtimer, int, 0644);
++MODULE_PARM_DESC(hrtimer, "Use hrtimer as the timer source.");
++#endif
++
++static struct platform_device *devices[SNDRV_CARDS];
++
++#define MIXER_ADDR_MASTER	0
++#define MIXER_ADDR_LINE		1
++#define MIXER_ADDR_MIC		2
++#define MIXER_ADDR_SYNTH	3
++#define MIXER_ADDR_CD		4
++#define MIXER_ADDR_LAST		4
++
++struct dummy_timer_ops {
++	int (*create)(struct snd_pcm_substream *);
++	void (*free)(struct snd_pcm_substream *);
++	int (*prepare)(struct snd_pcm_substream *);
++	int (*start)(struct snd_pcm_substream *);
++	int (*stop)(struct snd_pcm_substream *);
++	snd_pcm_uframes_t (*pointer)(struct snd_pcm_substream *);
++};
++
++struct snd_dummy {
++	struct snd_card *card;
++	struct snd_pcm *pcm;
++	spinlock_t mixer_lock;
++	int mixer_volume[MIXER_ADDR_LAST+1][2];
++	int capture_source[MIXER_ADDR_LAST+1][2];
++	const struct dummy_timer_ops *timer_ops;
++};
++
++/*
++ * system timer interface
++ */
++
++struct dummy_systimer_pcm {
++	spinlock_t lock;
++	struct timer_list timer;
++	unsigned long base_time;
++	unsigned int frac_pos;	/* fractional sample position (based HZ) */
++	unsigned int frac_period_rest;
++	unsigned int frac_buffer_size;	/* buffer_size * HZ */
++	unsigned int frac_period_size;	/* period_size * HZ */
++	unsigned int rate;
++	int elapsed;
++	struct snd_pcm_substream *substream;
++};
++
++static void dummy_systimer_rearm(struct dummy_systimer_pcm *dpcm)
++{
++	dpcm->timer.expires = jiffies +
++		(dpcm->frac_period_rest + dpcm->rate - 1) / dpcm->rate;
++	add_timer(&dpcm->timer);
++}
++
++static void dummy_systimer_update(struct dummy_systimer_pcm *dpcm)
++{
++	unsigned long delta;
++
++	delta = jiffies - dpcm->base_time;
++	if (!delta)
++		return;
++	dpcm->base_time += delta;
++	delta *= dpcm->rate;
++	dpcm->frac_pos += delta;
++	while (dpcm->frac_pos >= dpcm->frac_buffer_size)
++		dpcm->frac_pos -= dpcm->frac_buffer_size;
++	while (dpcm->frac_period_rest <= delta) {
++		dpcm->elapsed++;
++		dpcm->frac_period_rest += dpcm->frac_period_size;
++	}
++	dpcm->frac_period_rest -= delta;
++}
++
++static int dummy_systimer_start(struct snd_pcm_substream *substream)
++{
++	struct dummy_systimer_pcm *dpcm = substream->runtime->private_data;
++	spin_lock(&dpcm->lock);
++	dpcm->base_time = jiffies;
++	dummy_systimer_rearm(dpcm);
++	spin_unlock(&dpcm->lock);
++	return 0;
++}
++
++static int dummy_systimer_stop(struct snd_pcm_substream *substream)
++{
++	struct dummy_systimer_pcm *dpcm = substream->runtime->private_data;
++	spin_lock(&dpcm->lock);
++	del_timer(&dpcm->timer);
++	spin_unlock(&dpcm->lock);
++	return 0;
++}
++
++static int dummy_systimer_prepare(struct snd_pcm_substream *substream)
++{
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	struct dummy_systimer_pcm *dpcm = runtime->private_data;
++
++	dpcm->frac_pos = 0;
++	dpcm->rate = runtime->rate;
++	dpcm->frac_buffer_size = runtime->buffer_size * HZ;
++	dpcm->frac_period_size = runtime->period_size * HZ;
++	dpcm->frac_period_rest = dpcm->frac_period_size;
++	dpcm->elapsed = 0;
++
++	return 0;
++}
++
++static void dummy_systimer_callback(unsigned long data)
++{
++	struct dummy_systimer_pcm *dpcm = (struct dummy_systimer_pcm *)data;
++	unsigned long flags;
++	int elapsed = 0;
++
++	spin_lock_irqsave(&dpcm->lock, flags);
++	dummy_systimer_update(dpcm);
++	dummy_systimer_rearm(dpcm);
++	elapsed = dpcm->elapsed;
++	dpcm->elapsed = 0;
++	spin_unlock_irqrestore(&dpcm->lock, flags);
++	if (elapsed)
++		snd_pcm_period_elapsed(dpcm->substream);
++}
++
++static snd_pcm_uframes_t
++dummy_systimer_pointer(struct snd_pcm_substream *substream)
++{
++	struct dummy_systimer_pcm *dpcm = substream->runtime->private_data;
++	snd_pcm_uframes_t pos;
++
++	spin_lock(&dpcm->lock);
++	dummy_systimer_update(dpcm);
++	pos = dpcm->frac_pos / HZ;
++	spin_unlock(&dpcm->lock);
++	return pos;
++}
++
++static int dummy_systimer_create(struct snd_pcm_substream *substream)
++{
++	struct dummy_systimer_pcm *dpcm;
++
++	dpcm = kzalloc(sizeof(*dpcm), GFP_KERNEL);
++	if (!dpcm)
++		return -ENOMEM;
++	substream->runtime->private_data = dpcm;
++	init_timer(&dpcm->timer);
++	dpcm->timer.data = (unsigned long) dpcm;
++	dpcm->timer.function = dummy_systimer_callback;
++	spin_lock_init(&dpcm->lock);
++	dpcm->substream = substream;
++	return 0;
++}
++
++static void dummy_systimer_free(struct snd_pcm_substream *substream)
++{
++	kfree(substream->runtime->private_data);
++}
++
++static struct dummy_timer_ops dummy_systimer_ops = {
++	.create =	dummy_systimer_create,
++	.free =		dummy_systimer_free,
++	.prepare =	dummy_systimer_prepare,
++	.start =	dummy_systimer_start,
++	.stop =		dummy_systimer_stop,
++	.pointer =	dummy_systimer_pointer,
++};
++
++#ifdef CONFIG_HIGH_RES_TIMERS
++/*
++ * hrtimer interface
++ */
++
++struct dummy_hrtimer_pcm {
++	ktime_t base_time;
++	ktime_t period_time;
++	atomic_t running;
++	struct hrtimer timer;
++	struct tasklet_struct tasklet;
++	struct snd_pcm_substream *substream;
++};
++
++static void dummy_hrtimer_pcm_elapsed(unsigned long priv)
++{
++	struct dummy_hrtimer_pcm *dpcm = (struct dummy_hrtimer_pcm *)priv;
++	if (atomic_read(&dpcm->running))
++		snd_pcm_period_elapsed(dpcm->substream);
++}
++
++static enum hrtimer_restart dummy_hrtimer_callback(struct hrtimer *timer)
++{
++	struct dummy_hrtimer_pcm *dpcm;
++
++	dpcm = container_of(timer, struct dummy_hrtimer_pcm, timer);
++	if (!atomic_read(&dpcm->running))
++		return HRTIMER_NORESTART;
++	tasklet_schedule(&dpcm->tasklet);
++	hrtimer_forward_now(timer, dpcm->period_time);
++	return HRTIMER_RESTART;
++}
++
++static int dummy_hrtimer_start(struct snd_pcm_substream *substream)
++{
++	struct dummy_hrtimer_pcm *dpcm = substream->runtime->private_data;
++
++	dpcm->base_time = hrtimer_cb_get_time(&dpcm->timer);
++	hrtimer_start(&dpcm->timer, dpcm->period_time, HRTIMER_MODE_REL);
++	atomic_set(&dpcm->running, 1);
++	return 0;
++}
++
++static int dummy_hrtimer_stop(struct snd_pcm_substream *substream)
++{
++	struct dummy_hrtimer_pcm *dpcm = substream->runtime->private_data;
++
++	atomic_set(&dpcm->running, 0);
++	hrtimer_cancel(&dpcm->timer);
++	return 0;
++}
++
++static inline void dummy_hrtimer_sync(struct dummy_hrtimer_pcm *dpcm)
++{
++	tasklet_kill(&dpcm->tasklet);
++}
++
++static snd_pcm_uframes_t
++dummy_hrtimer_pointer(struct snd_pcm_substream *substream)
++{
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	struct dummy_hrtimer_pcm *dpcm = runtime->private_data;
++	u64 delta;
++	u32 pos;
++
++	delta = ktime_us_delta(hrtimer_cb_get_time(&dpcm->timer),
++			       dpcm->base_time);
++	delta = div_u64(delta * runtime->rate + 999999, 1000000);
++	div_u64_rem(delta, runtime->buffer_size, &pos);
++	return pos;
++}
++
++static int dummy_hrtimer_prepare(struct snd_pcm_substream *substream)
++{
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	struct dummy_hrtimer_pcm *dpcm = runtime->private_data;
++	unsigned int period, rate;
++	long sec;
++	unsigned long nsecs;
++
++	dummy_hrtimer_sync(dpcm);
++	period = runtime->period_size;
++	rate = runtime->rate;
++	sec = period / rate;
++	period %= rate;
++	nsecs = div_u64((u64)period * 1000000000UL + rate - 1, rate);
++	dpcm->period_time = ktime_set(sec, nsecs);
++
++	return 0;
++}
++
++static int dummy_hrtimer_create(struct snd_pcm_substream *substream)
++{
++	struct dummy_hrtimer_pcm *dpcm;
++
++	dpcm = kzalloc(sizeof(*dpcm), GFP_KERNEL);
++	if (!dpcm)
++		return -ENOMEM;
++	substream->runtime->private_data = dpcm;
++	hrtimer_init(&dpcm->timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
++	dpcm->timer.function = dummy_hrtimer_callback;
++	dpcm->substream = substream;
++	atomic_set(&dpcm->running, 0);
++	tasklet_init(&dpcm->tasklet, dummy_hrtimer_pcm_elapsed,
++		     (unsigned long)dpcm);
++	return 0;
++}
++
++static void dummy_hrtimer_free(struct snd_pcm_substream *substream)
++{
++	struct dummy_hrtimer_pcm *dpcm = substream->runtime->private_data;
++	dummy_hrtimer_sync(dpcm);
++	kfree(dpcm);
++}
++
++static struct dummy_timer_ops dummy_hrtimer_ops = {
++	.create =	dummy_hrtimer_create,
++	.free =		dummy_hrtimer_free,
++	.prepare =	dummy_hrtimer_prepare,
++	.start =	dummy_hrtimer_start,
++	.stop =		dummy_hrtimer_stop,
++	.pointer =	dummy_hrtimer_pointer,
++};
++
++#endif /* CONFIG_HIGH_RES_TIMERS */
++
++/*
++ * PCM interface
++ */
++
++static int dummy_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
++{
++	struct snd_dummy *dummy = snd_pcm_substream_chip(substream);
++
++	switch (cmd) {
++	case SNDRV_PCM_TRIGGER_START:
++	case SNDRV_PCM_TRIGGER_RESUME:
++		return dummy->timer_ops->start(substream);
++	case SNDRV_PCM_TRIGGER_STOP:
++	case SNDRV_PCM_TRIGGER_SUSPEND:
++		return dummy->timer_ops->stop(substream);
++	}
++	return -EINVAL;
++}
++
++static int dummy_pcm_prepare(struct snd_pcm_substream *substream)
++{
++	struct snd_dummy *dummy = snd_pcm_substream_chip(substream);
++
++	return dummy->timer_ops->prepare(substream);
++}
++
++static snd_pcm_uframes_t dummy_pcm_pointer(struct snd_pcm_substream *substream)
++{
++	struct snd_dummy *dummy = snd_pcm_substream_chip(substream);
++
++	return dummy->timer_ops->pointer(substream);
++}
++
++static struct snd_pcm_hardware dummy_pcm_hardware = {
++#if (CONFIG_ATHEROS_AOW == 1)
++    .info =      SNDRV_PCM_INFO_INTERLEAVED,
++#else
++	.info =			(SNDRV_PCM_INFO_MMAP |
++				 SNDRV_PCM_INFO_INTERLEAVED |
++				 SNDRV_PCM_INFO_RESUME |
++				 SNDRV_PCM_INFO_MMAP_VALID),
++#endif
++	.formats =		USE_FORMATS,
++	.rates =		USE_RATE,
++	.rate_min =		USE_RATE_MIN,
++	.rate_max =		USE_RATE_MAX,
++	.channels_min =		USE_CHANNELS_MIN,
++	.channels_max =		USE_CHANNELS_MAX,
++	.buffer_bytes_max =	MAX_BUFFER_SIZE,
++	.period_bytes_min =	64,
++	.period_bytes_max =	MAX_PERIOD_SIZE,
++	.periods_min =		USE_PERIODS_MIN,
++	.periods_max =		USE_PERIODS_MAX,
++	.fifo_size =		0,
++};
++
++static int dummy_pcm_hw_params(struct snd_pcm_substream *substream,
++			       struct snd_pcm_hw_params *hw_params)
++{
++	aud_channels = params_channels(hw_params);
++	if (fake_buffer) {
++		/* runtime->dma_bytes has to be set manually to allow mmap */
++		substream->runtime->dma_bytes = params_buffer_bytes(hw_params);
++		return 0;
++	}
++	return snd_pcm_lib_malloc_pages(substream,
++					params_buffer_bytes(hw_params));
++}
++
++static int dummy_pcm_hw_free(struct snd_pcm_substream *substream)
++{
++	if (fake_buffer)
++		return 0;
++	return snd_pcm_lib_free_pages(substream);
++}
++
++static int dummy_pcm_open(struct snd_pcm_substream *substream)
++{
++	struct snd_dummy *dummy = snd_pcm_substream_chip(substream);
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	int err;
++
++	dummy->timer_ops = &dummy_systimer_ops;
++#ifdef CONFIG_HIGH_RES_TIMERS
++	if (hrtimer)
++		dummy->timer_ops = &dummy_hrtimer_ops;
++#endif
++
++	err = dummy->timer_ops->create(substream);
++	if (err < 0)
++		return err;
++
++	runtime->hw = dummy_pcm_hardware;
++	if (substream->pcm->device & 1) {
++		runtime->hw.info &= ~SNDRV_PCM_INFO_INTERLEAVED;
++		runtime->hw.info |= SNDRV_PCM_INFO_NONINTERLEAVED;
++	}
++	if (substream->pcm->device & 2)
++		runtime->hw.info &= ~(SNDRV_PCM_INFO_MMAP |
++				      SNDRV_PCM_INFO_MMAP_VALID);
++
++	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
++		err = add_playback_constraints(substream->runtime);
++	else
++		err = add_capture_constraints(substream->runtime);
++	if (err < 0) {
++		dummy->timer_ops->free(substream);
++		return err;
++	}
++	return 0;
++}
++
++static int dummy_pcm_close(struct snd_pcm_substream *substream)
++{
++	struct snd_dummy *dummy = snd_pcm_substream_chip(substream);
++	dummy->timer_ops->free(substream);
++	return 0; /* do nothing */
++
++}
++
++/*
++ * dummy buffer handling
++ */
++
++static void *dummy_page[2];
++
++static void free_fake_buffer(void)
++{
++	if (fake_buffer) {
++		int i;
++		for (i = 0; i < 2; i++)
++			if (dummy_page[i]) {
++				free_page((unsigned long)dummy_page[i]);
++				dummy_page[i] = NULL;
++			}
++	}
++}
++
++static int alloc_fake_buffer(void)
++{
++	int i;
++
++	if (!fake_buffer)
++		return 0;
++	for (i = 0; i < 2; i++) {
++		dummy_page[i] = (void *)get_zeroed_page(GFP_KERNEL);
++		if (!dummy_page[i]) {
++			free_fake_buffer();
++			return -ENOMEM;
++		}
++	}
++	return 0;
++}
++
++#define MAX_STEREO_CHANNELS 4 		/* Constant */
++#define ISOEP_INTVAL_MS 	2		/* Constant */
++#define AUDSIZE_STEREO_MS 	192
++#define AUDSIZE_STEREO_nMS (AUDSIZE_STEREO_MS * ISOEP_INTVAL_MS)
++
++#define AUDSIZE_ALLCH_nMS   384
++#define MAX_AUDSIZE       (AUDSIZE_STEREO_MS * MAX_STEREO_CHANNELS * ISOEP_INTVAL_MS ) /* Constant */
++unsigned int dummytsf = 0x12345678;
++
++void sendtodrv(u8* dst, int size)
++{
++#if (!defined FILE_DEBUG) && (!defined UDPDBG)
++	#define TSFDATASIZE	4
++#else
++	#define TSFDATASIZE 0
++#endif
++	#define UNITSIZE (sizeof(SDA_Header_t)+TSFDATASIZE+MAX_BUF_SIZE)
++	//create new buffer
++	int blkcnt = (size+MAX_BUF_SIZE-1) / MAX_BUF_SIZE;
++	int len = UNITSIZE*blkcnt;
++	int i = 0, BufferSize = 0;
++	struct ethhdr *eth_hdr;
++	SDA_Descriptor_t *share_mem_ptr;
++	u8 *ptr, *eth_ptr;
++	char *aowbuf = kzalloc(len, GFP_ATOMIC);
++	if (!aowbuf)
++	{
++		printk("%s %d Cannot alloc buffer from Kernel\n", __func__, __LINE__);
++		return;
++	}
++
++	//get tsf from driver will cause large latency.
++	//GetTSF(&dummytsf);
++
++	ptr	= aowbuf;
++	share_mem_ptr = (SDA_Descriptor_t *)aowbuf;
++#if (!defined FILE_DEBUG) && (!defined UDPDBG)
++	if (setSharedMemory4Send)
++		setSharedMemory4Send(0, aowbuf, len, UNITSIZE, 50);
++#endif
++
++	// fill header
++	for (i = 0; i < blkcnt; i++) {
++		//fill descript
++		share_mem_ptr->m_ReadyToCopy = 1;
++		share_mem_ptr->m_PayloadSize = (size > MAX_BUF_SIZE ? MAX_BUF_SIZE: size) + TSFDATASIZE;
++		share_mem_ptr->m_TimeStamp = 0;
++		//fill ethernet header
++		eth_ptr = ptr+sizeof(SDA_Header_t)-sizeof(struct ethhdr);
++		eth_hdr = (struct ethhdr *)eth_ptr;
++		//copy peermac from p2p-action which is called when AP-station-connected or client establish
++		memcpy(eth_hdr->h_dest,peermac,6);
++		eth_hdr->h_proto = htons(DIRECT_AUDIO_LLC_TYPE);
++#if (!defined FILE_DEBUG) && (!defined UDPDBG)
++		//add 4 byte offer for TSF data
++		memcpy(ptr+sizeof(SDA_Header_t),&dummytsf,TSFDATASIZE);
++		//fill real audio buffer from ALSA buf, dst in usrspace!;
++		memcpy(ptr+sizeof(SDA_Header_t)+TSFDATASIZE,dst,share_mem_ptr->m_PayloadSize-TSFDATASIZE);
++#elif defined FILE_DEBUG && (!defined UDPDBG)
++		{
++			char *buf = kzalloc(share_mem_ptr->m_PayloadSize, GFP_ATOMIC);
++			memcpy(buf, dst, share_mem_ptr->m_PayloadSize);
++			opendbgfile();
++			writefile(buf, share_mem_ptr->m_PayloadSize);
++			closedbgfile();
++			kfree(buf);
++		}
++#elif defined UDPDBG && (!defined FILE_DEBUG)
++		{
++			char *buf = kzalloc(share_mem_ptr->m_PayloadSize, GFP_ATOMIC);
++			memcpy(buf, dst, share_mem_ptr->m_PayloadSize);
++			ksocket_send(buf, share_mem_ptr->m_PayloadSize);
++			kfree(buf);
++		}
++#elif  (defined FILE_DEBUG) && (defined UDPDBG)
++	#error "DBG Interface can only activate one kind!"
++#endif
++		size -= (share_mem_ptr->m_PayloadSize-TSFDATASIZE);
++		dst += (share_mem_ptr->m_PayloadSize-TSFDATASIZE);
++		BufferSize += UNITSIZE;
++		ptr = ptr + UNITSIZE;
++		share_mem_ptr = (SDA_Descriptor_t *)ptr;
++	}
++#if (!defined FILE_DEBUG) && (!defined UDPDBG)
++	//notify Direct Audio module to send packet
++	if (function4Send)
++		function4Send(0, aowbuf, BufferSize);
++#endif
++	kfree(aowbuf);
++}
++
++static int dummy_pcm_copy(struct snd_pcm_substream *substream,
++			  int channel, snd_pcm_uframes_t pos,
++			  void __user *dst, snd_pcm_uframes_t count)
++{
++#if (CONFIG_ATHEROS_AOW == 1)
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	int size;
++	
++	static char localBuf[MAX_AUDSIZE];
++	static int localBufIdx = 0;
++	int idx = 0,qdep=0;
++	static unsigned long startJ=0, allCnt=0;
++	int remainSpace, remainData, copyLen;
++	if(startJ == 0) startJ = jiffies;
++	if(jiffies - startJ >= HZ)
++	{
++		printk("Rx speed=%lu,%d\n", allCnt, qdep);
++		allCnt = 0;
++		startJ = jiffies;
++	}
++	spin_lock(&dslock);
++//activate only when no any debug function
++	size = frames_to_bytes(runtime, count);
++//collect till 384 B
++	for(idx=0;idx<size;idx++)
++	{
++		remainSpace = AUDSIZE_ALLCH_nMS - localBufIdx;
++		remainData = size - idx;
++		if(remainSpace >= remainData)
++			copyLen = remainData;
++		else
++			copyLen = remainSpace;
++
++		copy_from_user(&localBuf[localBufIdx], &dst[idx], copyLen);
++		localBufIdx += copyLen;
++		allCnt += copyLen;
++		idx += copyLen - 1;
++		if(localBufIdx == AUDSIZE_ALLCH_nMS)
++		{
++			sendtodrv(localBuf, AUDSIZE_ALLCH_nMS);
++			localBufIdx = 0;
++		}
++		if(localBufIdx > AUDSIZE_ALLCH_nMS)
++
++		{
++			printk("BUG! Incorrect idx. Reset to 0\n");
++			localBufIdx = 0;
++		}
++	}
++	if (localBufIdx != 0)
++		sendtodrv(localBuf, localBufIdx);
++	localBufIdx = 0;
++#endif
++	spin_unlock(&dslock);
++	return 0; /* do nothing */
++}
++static int dummy_pcm_silence(struct snd_pcm_substream *substream,
++			     int channel, snd_pcm_uframes_t pos,
++			     snd_pcm_uframes_t count)
++{
++	return 0; /* do nothing */
++}
++
++static struct page *dummy_pcm_page(struct snd_pcm_substream *substream,
++				   unsigned long offset)
++{
++	return virt_to_page(dummy_page[substream->stream]); /* the same page */
++}
++
++static struct snd_pcm_ops dummy_pcm_ops = {
++	.open =		dummy_pcm_open,
++	.close =	dummy_pcm_close,
++	.ioctl =	snd_pcm_lib_ioctl,
++	.hw_params =	dummy_pcm_hw_params,
++	.hw_free =	dummy_pcm_hw_free,
++	.prepare =	dummy_pcm_prepare,
++	.trigger =	dummy_pcm_trigger,
++	.pointer =	dummy_pcm_pointer,
++};
++
++static struct snd_pcm_ops dummy_pcm_ops_no_buf = {
++	.open =		dummy_pcm_open,
++	.close =	dummy_pcm_close,
++	.ioctl =	snd_pcm_lib_ioctl,
++	.hw_params =	dummy_pcm_hw_params,
++	.hw_free =	dummy_pcm_hw_free,
++	.prepare =	dummy_pcm_prepare,
++	.trigger =	dummy_pcm_trigger,
++	.pointer =	dummy_pcm_pointer,
++	.copy =		dummy_pcm_copy,
++	.silence =	dummy_pcm_silence,
++	.page =		dummy_pcm_page,
++};
++
++static int __devinit snd_card_dummy_pcm(struct snd_dummy *dummy, int device,
++					int substreams)
++{
++	struct snd_pcm *pcm;
++	struct snd_pcm_ops *ops;
++	int err;
++
++	err = snd_pcm_new(dummy->card, "Dummy PCM", device,
++			       substreams, substreams, &pcm);
++	if (err < 0)
++		return err;
++	dummy->pcm = pcm;
++	if (fake_buffer)
++		ops = &dummy_pcm_ops_no_buf;
++	else
++		ops = &dummy_pcm_ops;
++	snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_PLAYBACK, ops);
++	snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_CAPTURE, ops);
++	pcm->private_data = dummy;
++	pcm->info_flags = 0;
++	strcpy(pcm->name, "Dummy PCM");
++	if (!fake_buffer) {
++		snd_pcm_lib_preallocate_pages_for_all(pcm,
++			SNDRV_DMA_TYPE_CONTINUOUS,
++			snd_dma_continuous_data(GFP_KERNEL),
++			0, 64*1024);
++	}
++	return 0;
++}
++
++/*
++ * mixer interface
++ */
++
++#define DUMMY_VOLUME(xname, xindex, addr) \
++{ .iface = SNDRV_CTL_ELEM_IFACE_MIXER, \
++  .access = SNDRV_CTL_ELEM_ACCESS_READWRITE | SNDRV_CTL_ELEM_ACCESS_TLV_READ, \
++  .name = xname, .index = xindex, \
++  .info = snd_dummy_volume_info, \
++  .get = snd_dummy_volume_get, .put = snd_dummy_volume_put, \
++  .private_value = addr, \
++  .tlv = { .p = db_scale_dummy } }
++
++static int snd_dummy_volume_info(struct snd_kcontrol *kcontrol,
++				 struct snd_ctl_elem_info *uinfo)
++{
++	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
++	uinfo->count = 2;
++	uinfo->value.integer.min = -50;
++	uinfo->value.integer.max = 100;
++	return 0;
++}
++
++static int snd_dummy_volume_get(struct snd_kcontrol *kcontrol,
++				struct snd_ctl_elem_value *ucontrol)
++{
++	struct snd_dummy *dummy = snd_kcontrol_chip(kcontrol);
++	int addr = kcontrol->private_value;
++
++	spin_lock_irq(&dummy->mixer_lock);
++	ucontrol->value.integer.value[0] = dummy->mixer_volume[addr][0];
++	ucontrol->value.integer.value[1] = dummy->mixer_volume[addr][1];
++	spin_unlock_irq(&dummy->mixer_lock);
++	return 0;
++}
++
++static int snd_dummy_volume_put(struct snd_kcontrol *kcontrol,
++				struct snd_ctl_elem_value *ucontrol)
++{
++	struct snd_dummy *dummy = snd_kcontrol_chip(kcontrol);
++	int change, addr = kcontrol->private_value;
++	int left, right;
++
++	left = ucontrol->value.integer.value[0];
++	if (left < -50)
++		left = -50;
++	if (left > 100)
++		left = 100;
++	right = ucontrol->value.integer.value[1];
++	if (right < -50)
++		right = -50;
++	if (right > 100)
++		right = 100;
++	spin_lock_irq(&dummy->mixer_lock);
++	change = dummy->mixer_volume[addr][0] != left ||
++	         dummy->mixer_volume[addr][1] != right;
++	dummy->mixer_volume[addr][0] = left;
++	dummy->mixer_volume[addr][1] = right;
++	spin_unlock_irq(&dummy->mixer_lock);
++	return change;
++}
++
++static const DECLARE_TLV_DB_SCALE(db_scale_dummy, -4500, 30, 0);
++
++#define DUMMY_CAPSRC(xname, xindex, addr) \
++{ .iface = SNDRV_CTL_ELEM_IFACE_MIXER, .name = xname, .index = xindex, \
++  .info = snd_dummy_capsrc_info, \
++  .get = snd_dummy_capsrc_get, .put = snd_dummy_capsrc_put, \
++  .private_value = addr }
++
++#define snd_dummy_capsrc_info	snd_ctl_boolean_stereo_info
++
++static int snd_dummy_capsrc_get(struct snd_kcontrol *kcontrol,
++				struct snd_ctl_elem_value *ucontrol)
++{
++	struct snd_dummy *dummy = snd_kcontrol_chip(kcontrol);
++	int addr = kcontrol->private_value;
++
++	spin_lock_irq(&dummy->mixer_lock);
++	ucontrol->value.integer.value[0] = dummy->capture_source[addr][0];
++	ucontrol->value.integer.value[1] = dummy->capture_source[addr][1];
++	spin_unlock_irq(&dummy->mixer_lock);
++	return 0;
++}
++
++static int snd_dummy_capsrc_put(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_value *ucontrol)
++{
++	struct snd_dummy *dummy = snd_kcontrol_chip(kcontrol);
++	int change, addr = kcontrol->private_value;
++	int left, right;
++
++	left = ucontrol->value.integer.value[0] & 1;
++	right = ucontrol->value.integer.value[1] & 1;
++	spin_lock_irq(&dummy->mixer_lock);
++	change = dummy->capture_source[addr][0] != left &&
++	         dummy->capture_source[addr][1] != right;
++	dummy->capture_source[addr][0] = left;
++	dummy->capture_source[addr][1] = right;
++	spin_unlock_irq(&dummy->mixer_lock);
++	return change;
++}
++
++static struct snd_kcontrol_new snd_dummy_controls[] = {
++DUMMY_VOLUME("Master Volume", 0, MIXER_ADDR_MASTER),
++DUMMY_CAPSRC("Master Capture Switch", 0, MIXER_ADDR_MASTER),
++DUMMY_VOLUME("Synth Volume", 0, MIXER_ADDR_SYNTH),
++DUMMY_CAPSRC("Synth Capture Switch", 0, MIXER_ADDR_SYNTH),
++DUMMY_VOLUME("Line Volume", 0, MIXER_ADDR_LINE),
++DUMMY_CAPSRC("Line Capture Switch", 0, MIXER_ADDR_LINE),
++DUMMY_VOLUME("Mic Volume", 0, MIXER_ADDR_MIC),
++DUMMY_CAPSRC("Mic Capture Switch", 0, MIXER_ADDR_MIC),
++DUMMY_VOLUME("CD Volume", 0, MIXER_ADDR_CD),
++DUMMY_CAPSRC("CD Capture Switch", 0, MIXER_ADDR_CD)
++};
++
++static int __devinit snd_card_dummy_new_mixer(struct snd_dummy *dummy)
++{
++	struct snd_card *card = dummy->card;
++	unsigned int idx;
++	int err;
++	printk("%s %d\n", __func__, __LINE__);
++	spin_lock_init(&dummy->mixer_lock);
++	strcpy(card->mixername, "Dummy Mixer");
++
++	for (idx = 0; idx < ARRAY_SIZE(snd_dummy_controls); idx++) {
++		err = snd_ctl_add(card, snd_ctl_new1(&snd_dummy_controls[idx], dummy));
++		if (err < 0)
++			return err;
++	}
++	return 0;
++}
++
++#if defined(CONFIG_SND_DEBUG) && defined(CONFIG_PROC_FS)
++/*
++ * proc interface
++ */
++static void print_formats(struct snd_info_buffer *buffer)
++{
++	int i;
++	for (i = 0; i < SNDRV_PCM_FORMAT_LAST; i++) {
++		if (dummy_pcm_hardware.formats & (1ULL << i))
++			snd_iprintf(buffer, " %s", snd_pcm_format_name(i));
++	}
++}
++
++static void print_rates(struct snd_info_buffer *buffer)
++{
++	static int rates[] = {
++		5512, 8000, 11025, 16000, 22050, 32000, 44100, 48000,
++		64000, 88200, 96000, 176400, 192000,
++	};
++	int i;
++	if (dummy_pcm_hardware.rates & SNDRV_PCM_RATE_CONTINUOUS)
++		snd_iprintf(buffer, " continuous");
++	if (dummy_pcm_hardware.rates & SNDRV_PCM_RATE_KNOT)
++		snd_iprintf(buffer, " knot");
++	for (i = 0; i < ARRAY_SIZE(rates); i++)
++		if (dummy_pcm_hardware.rates & (1 << i))
++			snd_iprintf(buffer, " %d", rates[i]);
++}
++
++#define get_dummy_int_ptr(ofs) \
++	(unsigned int *)((char *)&dummy_pcm_hardware + (ofs))
++#define get_dummy_ll_ptr(ofs) \
++	(unsigned long long *)((char *)&dummy_pcm_hardware + (ofs))
++
++struct dummy_hw_field {
++	const char *name;
++	const char *format;
++	unsigned int offset;
++	unsigned int size;
++};
++#define FIELD_ENTRY(item, fmt) {		   \
++	.name = #item,				   \
++	.format = fmt,				   \
++	.offset = offsetof(struct snd_pcm_hardware, item), \
++	.size = sizeof(dummy_pcm_hardware.item) }
++
++static struct dummy_hw_field fields[] = {
++	FIELD_ENTRY(formats, "%#llx"),
++	FIELD_ENTRY(rates, "%#x"),
++	FIELD_ENTRY(rate_min, "%d"),
++	FIELD_ENTRY(rate_max, "%d"),
++	FIELD_ENTRY(channels_min, "%d"),
++	FIELD_ENTRY(channels_max, "%d"),
++	FIELD_ENTRY(buffer_bytes_max, "%ld"),
++	FIELD_ENTRY(period_bytes_min, "%ld"),
++	FIELD_ENTRY(period_bytes_max, "%ld"),
++	FIELD_ENTRY(periods_min, "%d"),
++	FIELD_ENTRY(periods_max, "%d"),
++};
++
++static void dummy_proc_read(struct snd_info_entry *entry,
++			    struct snd_info_buffer *buffer)
++{
++	int i;
++	for (i = 0; i < ARRAY_SIZE(fields); i++) {
++		snd_iprintf(buffer, "%s ", fields[i].name);
++		if (fields[i].size == sizeof(int))
++			snd_iprintf(buffer, fields[i].format,
++				    *get_dummy_int_ptr(fields[i].offset));
++		else
++			snd_iprintf(buffer, fields[i].format,
++				    *get_dummy_ll_ptr(fields[i].offset));
++		if (!strcmp(fields[i].name, "formats"))
++			print_formats(buffer);
++		else if (!strcmp(fields[i].name, "rates"))
++			print_rates(buffer);
++		snd_iprintf(buffer, "\n");
++	}
++}
++
++static void dummy_proc_write(struct snd_info_entry *entry,
++			     struct snd_info_buffer *buffer)
++{
++	char line[64];
++	while (!snd_info_get_line(buffer, line, sizeof(line))) {
++		char item[20];
++		const char *ptr;
++		unsigned long long val;
++		int i;
++
++		ptr = snd_info_get_str(item, line, sizeof(item));
++		for (i = 0; i < ARRAY_SIZE(fields); i++) {
++			if (!strcmp(item, fields[i].name))
++				break;
++		}
++		if (i >= ARRAY_SIZE(fields))
++			continue;
++		snd_info_get_str(item, ptr, sizeof(item));
++		if (strict_strtoull(item, 0, &val))
++			continue;
++		if (fields[i].size == sizeof(int))
++			*get_dummy_int_ptr(fields[i].offset) = val;
++		else
++			*get_dummy_ll_ptr(fields[i].offset) = val;
++	}
++}
++
++static void __devinit dummy_proc_init(struct snd_dummy *chip)
++{
++	struct snd_info_entry *entry;
++	if (!snd_card_proc_new(chip->card, "dummy_pcm", &entry)) {
++		snd_info_set_text_ops(entry, chip, dummy_proc_read);
++		entry->c.text.write = dummy_proc_write;
++		entry->mode |= S_IWUSR;
++	}
++}
++#else
++#define dummy_proc_init(x)
++#endif /* CONFIG_SND_DEBUG && CONFIG_PROC_FS */
++
++static int __devinit snd_dummy_probe(struct platform_device *devptr)
++{
++	struct snd_card *card;
++	struct snd_dummy *dummy;
++	int idx, err=0;
++	int dev = devptr->id;
++#if (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,30))
++    card = snd_card_new(index[dev], id[dev], THIS_MODULE, sizeof(struct snd_dummy));
++    if(card == NULL)
++        err = -ENOMEM;
++#else
++	err = snd_card_create(index[dev], id[dev], THIS_MODULE,
++			      sizeof(struct snd_dummy), &card);
++#endif
++	if (err < 0)
++		return err;
++	dummy = card->private_data;
++	dummy->card = card;
++	for (idx = 0; idx < MAX_PCM_DEVICES && idx < pcm_devs[dev]; idx++) {
++		if (pcm_substreams[dev] < 1)
++			pcm_substreams[dev] = 1;
++		if (pcm_substreams[dev] > MAX_PCM_SUBSTREAMS)
++			pcm_substreams[dev] = MAX_PCM_SUBSTREAMS;
++		err = snd_card_dummy_pcm(dummy, idx, pcm_substreams[dev]);
++		if (err < 0)
++			goto __nodev;
++	}
++	err = snd_card_dummy_new_mixer(dummy);
++	if (err < 0)
++		goto __nodev;
++	strcpy(card->driver, "USB-Audio");
++	strcpy(card->shortname, "Dummy");
++	sprintf(card->longname, "Dummy %i", dev + 1);
++
++	dummy_proc_init(dummy);
++
++	snd_card_set_dev(card, &devptr->dev);
++
++	err = snd_card_register(card);
++	if (err == 0) {
++		platform_set_drvdata(devptr, card);
++		return 0;
++	}
++      __nodev:
++	snd_card_free(card);
++	return err;
++}
++
++static int __devexit snd_dummy_remove(struct platform_device *devptr)
++{
++	snd_card_free(platform_get_drvdata(devptr));
++	platform_set_drvdata(devptr, NULL);
++	return 0;
++}
++
++#ifdef CONFIG_PM
++static int snd_dummy_suspend(struct platform_device *pdev, pm_message_t state)
++{
++	struct snd_card *card = platform_get_drvdata(pdev);
++	struct snd_dummy *dummy = card->private_data;
++	snd_power_change_state(card, SNDRV_CTL_POWER_D3hot);
++	snd_pcm_suspend_all(dummy->pcm);
++	return 0;
++}
++
++static int snd_dummy_resume(struct platform_device *pdev)
++{
++	struct snd_card *card = platform_get_drvdata(pdev);
++	snd_power_change_state(card, SNDRV_CTL_POWER_D0);
++	return 0;
++}
++#endif
++
++#define SND_DUMMY_DRIVER	"snd_aow_dummy"
++
++static struct platform_driver snd_dummy_driver = {
++	.probe		= snd_dummy_probe,
++	.remove		= __devexit_p(snd_dummy_remove),
++#ifdef CONFIG_PM
++	.suspend	= snd_dummy_suspend,
++	.resume		= snd_dummy_resume,
++#endif
++	.driver		= {
++		.name	= SND_DUMMY_DRIVER
++	},
++};
++
++static void snd_dummy_unregister_all(void)
++{
++	int i;
++	for (i = 0; i < ARRAY_SIZE(devices); ++i)
++		platform_device_unregister(devices[i]);
++	platform_driver_unregister(&snd_dummy_driver);
++	free_fake_buffer();
++}
++
++static int __init alsa_card_dummy_init(void)
++{
++	int i, cards, err;
++
++	err = platform_driver_register(&snd_dummy_driver);
++	if (err < 0)
++		return err;
++
++	err = alloc_fake_buffer();
++	if (err < 0) {
++		platform_driver_unregister(&snd_dummy_driver);
++		return err;
++	}
++
++	cards = 0;
++	for (i = 0; i < SNDRV_CARDS; i++) {
++		struct platform_device *device;
++		if (! enable[i])
++			continue;
++		device = platform_device_register_simple(SND_DUMMY_DRIVER,
++							 i, NULL, 0);
++		if (IS_ERR(device))
++			continue;
++		if (!platform_get_drvdata(device)) {
++			platform_device_unregister(device);
++			continue;
++		}
++		devices[i] = device;
++		cards++;
++	}
++	if (!cards) {
++#ifdef MODULE
++		printk(KERN_ERR "Dummy soundcard not found or device busy\n");
++#endif
++		snd_dummy_unregister_all();
++		return -ENODEV;
++	}
++	spin_lock_init(&dslock);
++
++#ifdef UDPDBG
++	{
++        int err;
++        /* create a socket */
++        if ((err = sock_create(AF_INET, SOCK_DGRAM, IPPROTO_UDP, &sock_send)) < 0)
++        {
++			printk(KERN_ERR": Could not create a datagram socket, error = %d\n", -ENXIO);
++        }
++        memset(&addr_send, 0, sizeof(struct sockaddr));
++		addr_send.sin_family = AF_INET;
++        addr_send.sin_addr.s_addr = htonl(INADDR_SEND);
++        addr_send.sin_port = htons(CONNECT_PORT);
++	}
++#endif
++
++//initialize proc file
++	proc_dir = proc_mkdir(PROCFS_DIR, NULL);
++	if (proc_dir == NULL) {
++		remove_proc_entry(PROCFS_DIR, NULL);
++		pr_debug("Error: Could not initialize /proc/%s\n",
++				PROCFS_DIR);
++		return -ENOMEM;
++	}
++
++	proc_file = proc_create_data(PROCFS_NAME,
++					S_IRUSR | S_IWUSR, proc_dir,
++					&aow_fops, NULL);
++	if (proc_file == NULL) {
++		remove_proc_entry(PROCFS_NAME, proc_dir);
++		pr_debug("Error: Could not initialize /proc/%s\n",
++				PROCFS_NAME);
++		return -ENOMEM;
++	}
++
++	printk(KERN_INFO"/proc/%s/%s created\n", PROCFS_DIR, PROCFS_NAME);
++
++	proc_peermac = proc_create_data(PROCFS_PEERMAC,
++					S_IRUSR | S_IWUSR, proc_dir,
++					&peermac_fops, NULL);
++	if (proc_peermac == NULL) {
++		remove_proc_entry(PROCFS_NAME, proc_dir);
++		pr_debug("Error: Could not initialize /proc/%s\n",
++				PROCFS_NAME);
++		return -ENOMEM;
++	}
++
++	printk(KERN_INFO"/proc/%s/%s created\n", PROCFS_DIR, PROCFS_PEERMAC);
++
++//initializ TF as default AOW Engine
++#if (!defined FILE_DEBUG) && (!defined UDPDBG)
++	setSharedMemory4Send = SDA_CLD_setSharedMemory4Send;
++	function4Send = SDA_CLD_function4Send;
++	//GetTSF = SDA_CLD_GetTSF;
++#endif
++	return 0;
++}
++
++static void __exit alsa_card_dummy_exit(void)
++{
++	snd_dummy_unregister_all();
++#ifdef UDPDBG
++	{
++        sock_release(sock_send);
++        sock_send = NULL;
++	}
++#endif
++}
++
++module_init(alsa_card_dummy_init)
++module_exit(alsa_card_dummy_exit)
+diff -urN a/Makefile b/Makefile
+--- a/Makefile	1970-01-01 08:00:00.000000000 +0800
++++ b/Makefile	2015-12-11 13:51:03.497335967 +0800
+@@ -0,0 +1,19 @@
++#
++# Makefile for ALSA
++# Copyright (c) 2001 by Jaroslav Kysela <perex@perex.cz>
++#
++PWD=`pwd`
++snd-dummy-objs := aowvsndcard.o
++KBUILD_EXTRA_SYMBOLS := $(PWD)/Module.tf.symvers $(PWD)/Module.mck.symvers
++obj-$(CONFIG_SND_DUMMY) += snd-dummy.o
++KDIR=/lib/modules/`uname -r`/build
++
++all:
++	#cp ../ath6kl/Module.symvers ./Module.mck.symvers
++	cp ../qcacld-2.0/Module.symvers ./Module.tf.symvers
++	make -C $(KDIR) SUBDIRS=$(PWD) KBUILD_EXTRA_SYMBOLS=$(PWD)/Module.tf.symvers modules
++	#make -C $(KDIR) SUBDIRS=$(PWD) KBUILD_EXTRA_SYMBOLS=$(PWD)/Module.mck.symvers modules
++
++clean:
++	-rm -f *o *ko *cmd *.mod.c Module.symvers .dummy* .snd* .*.o.cmd Module.markers modules.order
++	rm -rf .tmp_versions *.symvers

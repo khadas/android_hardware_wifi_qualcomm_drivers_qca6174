@@ -1,0 +1,3895 @@
+diff -Naur bluedroid_qcom_5.0/Android.mk bluedroid/Android.mk
+--- bluedroid_qcom_5.0/Android.mk	2016-02-16 16:58:51.005081021 +0800
++++ bluedroid/Android.mk	2016-02-16 16:55:14.089077051 +0800
+@@ -17,9 +17,7 @@
+   bdroid_CFLAGS += -DHCILP_INCLUDED=$(BOARD_BLUETOOTH_BDROID_HCILP_INCLUDED)
+ endif
+ 
+-ifeq ($(BOARD_HAVE_BLUETOOTH_QCOM),true)
+-	include $(call all-subdir-makefiles)
+-endif
++include $(call all-subdir-makefiles)
+ 
+ # Cleanup our locals
+ bdroid_C_INCLUDES :=
+diff -Naur bluedroid_qcom_5.0/bta/3d/bta_3d_api.c bluedroid/bta/3d/bta_3d_api.c
+--- bluedroid_qcom_5.0/bta/3d/bta_3d_api.c	1970-01-01 08:00:00.000000000 +0800
++++ bluedroid/bta/3d/bta_3d_api.c	2016-02-16 16:55:45.657077629 +0800
+@@ -0,0 +1,266 @@
++//XXX copyright header?
++/******************************************************************************
++ *
++ *  This file contains the 3D Sync API in the subsystem of BTA.
++ *
++ ******************************************************************************/
++
++#include "bt_target.h"
++
++#if defined(BTA_3D_INCLUDED) && (BTA_3D_INCLUDED == TRUE)
++
++#include <stdlib.h>
++#include <string.h>
++#include <stdio.h>
++
++#include "bta_3d_api.h"
++#include "bta_3d_int.h"
++#include "l2c_api.h"
++
++/*****************************************************************************
++ **  Constants
++ *****************************************************************************/
++
++static const tBTA_SYS_REG bta_3d_reg =
++{
++    bta_3d_hdl_event,
++    BTA_3dDisable
++};
++
++/*******************************************************************************
++ **
++ ** Function         BTA_3dEnable
++ **
++ ** Description      This function enable 3D Display and registers the Dislpay with
++ **                  lower layers.
++ **
++ ** Returns          void
++ **
++ *******************************************************************************/
++void BTA_3dEnable(tBTA_3D_CBACK *p_cback, char *p_service_name)
++{
++    tBTA_3D_API_ENABLE *p_buf;
++
++    APPL_TRACE_API("%s: Enter", __FUNCTION__);
++
++    /* Register with BTA */
++    //GKI_sched_lock();
++    bta_sys_register(BTA_ID_3D, &bta_3d_reg);
++    //GKI_sched_unlock();
++    
++
++    if((p_buf = (tBTA_3D_API_ENABLE *)GKI_getbuf(sizeof(tBTA_3D_API_ENABLE))) != NULL)
++    {
++        p_buf->hdr.event = BTA_3D_API_ENABLE_EVT;
++        p_buf->p_cback   = p_cback;
++
++        if(p_service_name)
++            BCM_STRNCPY_S(p_buf->p_name, BTA_SERVICE_NAME_LEN+1, p_service_name, BTA_SERVICE_NAME_LEN);
++
++        bta_sys_sendmsg(p_buf);
++    }
++    APPL_TRACE_API("%s: Exit", __FUNCTION__);
++}
++
++/*******************************************************************************
++ **
++ ** Function         BTA_3dDisable
++ **
++ ** Description      This function is called when the host is about power down.
++ **
++ ** Returns          void
++ **
++ *******************************************************************************/
++void BTA_3dDisable(void)
++{
++    BT_HDR *p_buf;
++
++    APPL_TRACE_API("%s: Enter", __FUNCTION__);
++    if((p_buf = (BT_HDR *)GKI_getbuf(sizeof(BT_HDR))) != NULL)
++    {
++        p_buf->event = BTA_3D_API_DISABLE_EVT;
++
++        bta_sys_sendmsg(p_buf);
++    }
++
++    //GKI_sched_lock();
++    bta_sys_deregister(BTA_ID_3D);
++    //GKI_sched_unlock();
++
++    APPL_TRACE_API("%s: Exit", __FUNCTION__);
++}
++
++/*******************************************************************************
++ **
++ ** Function         BTA_3dWriteSyncParams
++ **
++ ** Description      This function writes the Synchronization Train Parameters.
++ **                  Note, for spec-compliance the Interval is coded to 80ms internally.
++ **
++ ** Returns          void
++ **
++ *******************************************************************************/
++void BTA_3dWriteSyncTrainParams(UINT32 timeout, UINT8 service_data)
++{
++    tBTA_3D_API_WRITE_SYNC_TRAIN_PARAMS *p_buf;
++
++    APPL_TRACE_API("%s: Enter", __FUNCTION__);
++    if((p_buf = (tBTA_3D_API_WRITE_SYNC_TRAIN_PARAMS *)GKI_getbuf(sizeof(tBTA_3D_API_WRITE_SYNC_TRAIN_PARAMS))) != NULL)
++    {
++        p_buf->hdr.event    = BTA_3D_API_WRITE_SYNC_PARAM_EVT;
++        p_buf->timeout      = timeout;
++        p_buf->service_data = service_data;
++
++        bta_sys_sendmsg(p_buf);
++    }
++    APPL_TRACE_API("%s: Exit", __FUNCTION__);
++}
++
++/*******************************************************************************
++ **
++ ** Function         BTA_3dStartSyncTrain
++ **
++ ** Description      This function start the synchronization train.
++ **
++ ** Returns          void
++ **
++ *******************************************************************************/
++void BTA_3dStartSyncTrain(void)
++{
++    BT_HDR *p_buf;
++
++    APPL_TRACE_API("%s: Enter", __FUNCTION__);
++    if((p_buf = (BT_HDR *)GKI_getbuf(sizeof(BT_HDR))) != NULL)
++    {
++        p_buf->event = BTA_3D_API_START_SYNC_TRAIN_EVT;
++
++        bta_sys_sendmsg(p_buf);
++    }
++    APPL_TRACE_API("%s: Exit", __FUNCTION__);
++}
++
++/*******************************************************************************
++ **
++ ** Function         BTA_3dSetBroadcastData
++ **
++ ** Description      This function sets the data being broadcast.
++ **
++ ** Returns          void
++ **
++ *******************************************************************************/
++void BTA_3dSetBroadcastData(tBTA_3D_BCAST_DATA *p_bcast_data)
++{
++    tBTA_3D_API_SET_BCAST_DATA *p_buf;
++
++    APPL_TRACE_API("%s: Enter", __FUNCTION__);
++    if((p_bcast_data) && ((p_buf = (tBTA_3D_API_SET_BCAST_DATA *)GKI_getbuf(sizeof(tBTA_3D_API_SET_BCAST_DATA))) != NULL))
++    {
++        p_buf->hdr.event  = BTA_3D_API_SET_BCAST_DATA_EVT;
++        p_buf->bcast_data = *p_bcast_data;
++
++        APPL_TRACE_API("%s: Enter, call bta_sys_sendmsg", __FUNCTION__);
++        bta_sys_sendmsg(p_buf);
++    }
++    else
++    {
++        APPL_TRACE_API("%s: Enter, not call bta_sys_sendmsg", __FUNCTION__);
++    }
++    APPL_TRACE_API("%s: Exit", __FUNCTION__);
++}
++
++/*******************************************************************************
++ **
++ ** Function         BTA_3dEnableBroadcasts
++ **
++ ** Description      This function enables 3D broadcasts.
++ **
++ ** Returns          void
++ **
++ *******************************************************************************/
++void BTA_3dEnableBroadcasts(UINT16 timeout, BOOLEAN low_power)
++{
++    tBTA_3D_API_ENABLE_BCAST *p_buf;
++
++    APPL_TRACE_API("%s: Enter", __FUNCTION__);
++    if((p_buf = (tBTA_3D_API_ENABLE_BCAST *)GKI_getbuf(sizeof(tBTA_3D_API_ENABLE_BCAST))) != NULL)
++    {
++        p_buf->hdr.event = BTA_3D_API_ENABLE_BCAST_EVT;
++        p_buf->timeout   = timeout;
++        p_buf->low_power = low_power;
++
++        bta_sys_sendmsg(p_buf);
++    }
++    APPL_TRACE_API("%s: Exit", __FUNCTION__);
++}
++
++/*******************************************************************************
++ **
++ ** Function         BTA_3dDisableBroadcasts
++ **
++ ** Description      This function disables 3D broadcasts.
++ **
++ ** Returns          void
++ **
++ *******************************************************************************/
++void BTA_3dDisableBroadcasts(void)
++{
++    BT_HDR *p_buf;
++
++    APPL_TRACE_API("%s: Enter", __FUNCTION__);
++    if((p_buf = (BT_HDR *)GKI_getbuf(sizeof(BT_HDR))) != NULL)
++    {
++        p_buf->event = BTA_3D_API_DISABLE_BCAST_EVT;
++
++        bta_sys_sendmsg(p_buf);
++    }
++    APPL_TRACE_API("%s: Exit", __FUNCTION__);
++}
++
++/*******************************************************************************
++ **
++ ** Function         BTA_3dEnableClockCapture
++ **
++ ** Description      This function enabled Triggered Clock Capture.
++ **
++ ** Returns          void
++ **
++ *******************************************************************************/
++void BTA_3dEnableClockCapture(UINT8 filter_count)
++{
++    tBTA_3D_API_ENABLE_CLK_CAP *p_buf;
++
++    APPL_TRACE_API("%s: Enter", __FUNCTION__);
++    if((p_buf = (tBTA_3D_API_ENABLE_CLK_CAP *)GKI_getbuf(sizeof(tBTA_3D_API_ENABLE_CLK_CAP))) != NULL)
++    {
++        p_buf->hdr.event    = BTA_3D_API_ENABLE_CLK_CAP_EVT;
++        p_buf->filter_count = filter_count;
++
++        bta_sys_sendmsg(p_buf);
++    }
++    APPL_TRACE_API("%s: Exit", __FUNCTION__);
++}
++
++/*******************************************************************************
++ **
++ ** Function         BTA_3dDisableClockCapture
++ **
++ ** Description      This function disabled Triggered Clock Capture.
++ **
++ ** Returns          void
++ **
++ *******************************************************************************/
++void BTA_3dDisableClockCapture(void)
++{
++    BT_HDR *p_buf;
++
++    APPL_TRACE_API("%s: Enter", __FUNCTION__);
++    if((p_buf = (BT_HDR *)GKI_getbuf(sizeof(BT_HDR))) != NULL)
++    {
++        p_buf->event = BTA_3D_API_DISABLE_CLK_CAP_EVT;
++
++        bta_sys_sendmsg(p_buf);
++    }
++    APPL_TRACE_API("%s: Exit", __FUNCTION__);
++}
++
++#endif
+diff -Naur bluedroid_qcom_5.0/bta/3d/bta_3d_int.h bluedroid/bta/3d/bta_3d_int.h
+--- bluedroid_qcom_5.0/bta/3d/bta_3d_int.h	1970-01-01 08:00:00.000000000 +0800
++++ bluedroid/bta/3d/bta_3d_int.h	2016-02-16 16:55:14.337077056 +0800
+@@ -0,0 +1,200 @@
++/******************************************************************************
++ *
++ *  This file contains BTA 3D Sync internal definitions
++ *
++ ******************************************************************************/
++
++#ifndef BTA_3D_INT_H
++#define BTA_3D_INT_H
++
++#include "bta_sys.h"
++#include "bd.h"
++#include "utl.h"
++#include "bta_3d_api.h"
++
++#define PSM_3D_SYNC                0x0021
++#define BTA_3D_LT_ADDR             1
++
++#define BTA_3D_BCAST_DATA_BUF_SIZE 17
++
++#define BTA_3D_BCAST_INSTANT_BITMASK 0x03FFFFFF
++#define BTA_3D_BCAST_VMODE_BITMASK   0x40000000
++
++#define BTA_3D_BCAST_VMODE_3D        0x00000000
++#define BTA_3D_BCAST_VMODE_DUAL_VIEW 0x40000000
++
++#define BTA_3D_LEGACY_VS_ASSOC_CMD_OCF 0x0013
++
++#define BTA_3D_LEGACY_VS_ASSOC_EVT_CODE 0x14
++#define BTA_3D_LEGACY_VS_ASSOC_EVT_LEN  18
++
++#define BTA_3D_CLB_BR_PACKETS        (BTM_ACL_PKT_TYPES_MASK_DM1 | \
++                                      BTM_ACL_PKT_TYPES_MASK_NO_2_DH1 | \
++                                      BTM_ACL_PKT_TYPES_MASK_NO_3_DH1 | \
++                                      BTM_ACL_PKT_TYPES_MASK_NO_2_DH3 | \
++                                      BTM_ACL_PKT_TYPES_MASK_NO_3_DH3 | \
++                                      BTM_ACL_PKT_TYPES_MASK_NO_2_DH5 | \
++                                      BTM_ACL_PKT_TYPES_MASK_NO_3_DH5)
++
++#define BTA_3D_LEGACY_INTERVAL_MIN_MAX 80
++
++#define CONVERT_TO_BASEBAND_SLOTS(_x)                             ((UINT32)((((8000L * ((unsigned long)(_x))) / 500L) + 5L)/10L))
++#define CONVERT_FROM_BASEBAND_SLOTS(_x)                           ((UINT32)((((5000L * (_x)) / 800L) + 5L)/10L))
++
++#define BTA_3D_LEGACY_INTERVAL_MIN_MAX_SLOTS (CONVERT_TO_BASEBAND_SLOTS(BTA_3D_LEGACY_INTERVAL_MIN_MAX))
++
++#define BTA_3D_UCD_CONN_MSG_SIZE 3
++
++#define BTA_3D_UCD_OPCODE_CONN_ANN 0
++/* Events for the main mailbox. */
++enum
++{
++    /* API events */
++    BTA_3D_API_ENABLE_EVT = BTA_SYS_EVT_START(BTA_ID_3D),
++    BTA_3D_API_DISABLE_EVT,
++    BTA_3D_API_WRITE_SYNC_PARAM_EVT,
++    BTA_3D_API_START_SYNC_TRAIN_EVT,
++    BTA_3D_API_SET_BCAST_DATA_EVT,
++    BTA_3D_API_ENABLE_BCAST_EVT,
++    BTA_3D_API_DISABLE_BCAST_EVT,
++    BTA_3D_API_ENABLE_CLK_CAP_EVT,
++    BTA_3D_API_DISABLE_CLK_CAP_EVT,
++
++    /* Callback events */
++    BTA_3D_BTM_CLB_CMD_CMPL_EVT,
++    BTA_3D_BTM_SYNC_TRAIN_CMPL_EVT,
++    BTA_3D_BTM_TRG_CLK_CAP_EVT,
++    BTA_3D_BTM_SLV_PAGE_RSP_TO_EVT,
++    BTA_3D_L2CA_UCD_DATA_EVT,
++    BTA_3D_BTM_TX_PWR_EVT,
++    BTA_3D_BTM_VS_EVT,
++    BTA_3D_BTM_CLB_CHANNEL_CHANGE_EVT
++};
++
++typedef struct
++{
++    BT_HDR         hdr;
++    tBTA_3D_CBACK *p_cback;
++    char           p_name[BTA_SERVICE_NAME_LEN+1];
++
++} tBTA_3D_API_ENABLE;
++
++typedef struct
++{
++    BT_HDR hdr;
++    UINT32 timeout;
++    UINT8  service_data;
++
++} tBTA_3D_API_WRITE_SYNC_TRAIN_PARAMS;
++
++typedef struct
++{
++    BT_HDR             hdr;
++    tBTA_3D_BCAST_DATA bcast_data;
++
++} tBTA_3D_API_SET_BCAST_DATA;
++
++typedef struct
++{
++    BT_HDR  hdr;
++    UINT16  timeout;
++    BOOLEAN low_power;
++
++} tBTA_3D_API_ENABLE_BCAST;
++
++typedef struct
++{
++    BT_HDR hdr;
++    UINT8  filter_count;
++
++} tBTA_3D_API_ENABLE_CLK_CAP;
++
++typedef struct
++{
++    BT_HDR            hdr;
++    tBTM_CLB_CMD_CMPL data;
++} tBTA_3D_BTM_CLB_CMD_CMPL;
++
++typedef struct
++{
++    BT_HDR hdr;
++    UINT8  status;
++} tBTA_3D_BTM_SYNC_TRAIN_CMPL;
++
++typedef struct
++{
++    BT_HDR           hdr;
++    tBTM_TRG_CLK_CAP data;
++} tBTA_3D_BTM_TRG_CLK_CAP;
++
++typedef struct
++{
++    BT_HDR  hdr;
++    BD_ADDR bd;
++    UINT16  len;
++    UINT8   data[1];
++} tBTA_3D_L2CA_UCD_DATA;
++
++typedef struct
++{
++    BT_HDR      hdr;
++    tBTM_STATUS status;
++    INT8        tx_power;
++} tBTA_3D_BTM_TX_PWR;
++
++typedef struct
++{
++    BT_HDR hdr;
++    UINT8  len;
++    UINT8  data[1];
++} tBTA_3D_BTM_VS_EVT;
++
++typedef union
++{
++    BT_HDR                              hdr;
++    tBTA_3D_API_ENABLE                  api_enable;
++    tBTA_3D_API_WRITE_SYNC_TRAIN_PARAMS api_write_train_params;
++    tBTA_3D_API_SET_BCAST_DATA          api_set_bcast_data;
++    tBTA_3D_API_ENABLE_BCAST            api_enable_bcast;
++    tBTA_3D_API_ENABLE_CLK_CAP          api_enable_clk_cap;
++    tBTA_3D_BTM_CLB_CMD_CMPL            clb_cmd_cmpl;
++    tBTA_3D_BTM_SYNC_TRAIN_CMPL         sync_train_cmpl;
++    tBTA_3D_BTM_TRG_CLK_CAP             trg_clk_cap;
++    tBTA_3D_L2CA_UCD_DATA               ucd_data;
++    tBTA_3D_BTM_TX_PWR                  tx_power;
++    tBTA_3D_BTM_VS_EVT                  vs_evt;
++} tBTA_3D_DATA;
++
++extern BOOLEAN bta_3d_hdl_event(BT_HDR *p_msg);
++
++/******************************************************************************
++** Main Control Block
++*******************************************************************************/
++enum
++{
++    BTA_3D_DISABLED,
++    BTA_3D_ENABLING,
++    BTA_3D_ENABLED,
++    BTA_3D_DISABLING
++};
++
++typedef UINT8 tBTA_3D_STATE;
++
++typedef struct
++{
++    tBTA_3D_STATE  state;
++    tBTA_3D_CBACK *p_cback;
++    UINT32         sdp_handle;
++    UINT8          lt_addr;
++    UINT16         psm;
++}
++tBTA_3D_CB;
++
++#if BTA_DYNAMIC_MEMORY == FALSE
++extern tBTA_3D_CB bta_3d_cb;
++#else
++extern tBTA_3D_CB *bta_3d_cb_ptr;
++#define bta_3d_cb (*bta_3d_cb_ptr)
++#endif
++
++#endif
+diff -Naur bluedroid_qcom_5.0/bta/3d/bta_3d_main.c bluedroid/bta/3d/bta_3d_main.c
+--- bluedroid_qcom_5.0/bta/3d/bta_3d_main.c	1970-01-01 08:00:00.000000000 +0800
++++ bluedroid/bta/3d/bta_3d_main.c	2016-02-16 16:55:14.337077056 +0800
+@@ -0,0 +1,801 @@
++/******************************************************************************
++ *
++ *  This file contains the 3D Sync main functions and state machine.
++ *
++ ******************************************************************************/
++
++#include "bt_target.h"
++
++#if defined(BTA_3D_INCLUDED) && (BTA_3D_INCLUDED == TRUE)
++
++#include <string.h>
++
++#include "bta_3d_api.h"
++#include "bta_3d_int.h"
++#include "gki.h"
++#include "l2c_api.h"
++#include "btm_api.h"
++#include "sdp_api.h"
++
++/*****************************************************************************
++** Global data
++*****************************************************************************/
++#if BTA_DYNAMIC_MEMORY == FALSE
++tBTA_3D_CB  bta_3d_cb;
++#endif
++
++
++/*****************************************************************************
++** Internal function definitions
++*****************************************************************************/
++static void bta_3d_api_enable(tBTA_3D_DATA *p_data);
++static void bta_3d_api_disable(void);
++static void bta_3d_api_write_params(tBTA_3D_DATA *p_data);
++static void bta_3d_api_start_train(void);
++static void bta_3d_api_set_bcast_data(tBTA_3D_DATA *p_data);
++static void bta_3d_api_enable_bcast(tBTA_3D_DATA *p_data);
++static void bta_3d_api_disable_bcast(void);
++static void bta_3d_api_enable_clk_cap(tBTA_3D_DATA *p_data);
++static void bta_3d_api_disable_clk_cap(void);
++
++static void bta_3d_btm_clb_cmd_cmpl(tBTA_3D_DATA *p_data);
++static void bta_3d_btm_sync_train_cmpl(tBTA_3D_DATA *p_data);
++static void bta_3d_btm_trg_clk_cap(tBTA_3D_DATA *p_data);
++static void bta_3d_btm_slv_page_rsp_to(void);
++static void bta_3d_btm_tx_pwr(tBTA_3D_DATA *p_data);
++static void bta_3d_l2ca_ucd_data(tBTA_3D_DATA *p_data);
++static void bta_3d_btm_vs_evt(tBTA_3D_DATA *p_data);
++static void bta_3d_btm_clb_channel_change_evt(void);
++
++static void btm_clb_cmd_cmpl(void *result);
++static void btm_sync_train_cmpl(UINT8 status);
++static void btm_trg_clk_cap(tBTM_TRG_CLK_CAP *p);
++static void btm_slave_page_response_to(void);
++static void btm_read_inq_rsp_tx_pwr_cmpl(void *p_buf);
++static void btm_vs_cmpl(tBTM_VSC_CMPL *p_buf);
++static void btm_vs_evt(UINT8 len, UINT8 *p);
++static void btm_clb_channel_change(void);
++
++static void l2ca_ucd_disc_cb(BD_ADDR bd, UINT8 type, UINT32 data);
++static void l2ca_ucd_data_cb(BD_ADDR bd, BT_HDR *p_buf);
++static void l2ca_ucd_cong_status_cb(BD_ADDR bd, BOOLEAN cong);
++
++static void l2ca_connect_ind(BD_ADDR bd, UINT16 lcid, UINT16 psm, UINT8 id);
++static void l2ca_connect_cfm(UINT16 lcid, UINT16 result);
++static void l2ca_connect_pnd_cb(UINT16 lcid);
++static void l2ca_config_ind(UINT16 lcid, tL2CAP_CFG_INFO *info);
++static void l2ca_config_cfm(UINT16 lcid, tL2CAP_CFG_INFO *info);
++static void l2ca_disc_ind(UINT16 lcid, BOOLEAN ack);
++static void l2ca_disc_cfm(UINT16 lcid, UINT16 result);
++static void l2ca_qos_violation_ind(BD_ADDR bd);
++static void l2ca_data_ind(UINT16 lcid, BT_HDR *p_buf);
++static void l2ca_cong_status(UINT16 lcid, BOOLEAN cong);
++static void l2ca_tx_cmpl(UINT16 lcid, UINT16 num);
++/*****************************************************************************
++** Constants and Types
++*****************************************************************************/
++static const tBTM_CLB_CB_INFO btm_clb_cb_info =
++{
++    btm_clb_cmd_cmpl,
++    btm_trg_clk_cap,
++    btm_sync_train_cmpl,
++    btm_slave_page_response_to,
++    btm_clb_channel_change
++};
++
++static const tL2CAP_UCD_CB_INFO l2ca_cb_info =
++{
++    l2ca_ucd_disc_cb,
++    l2ca_ucd_data_cb,
++    l2ca_ucd_cong_status_cb
++};
++
++static const tL2CAP_APPL_INFO l2ca_appl_info =
++{
++    l2ca_connect_ind,
++    l2ca_connect_cfm,
++    l2ca_connect_pnd_cb,
++    l2ca_config_ind,
++    l2ca_config_cfm,
++    l2ca_disc_ind,
++    l2ca_disc_cfm,
++    l2ca_qos_violation_ind,
++    l2ca_data_ind,
++    l2ca_cong_status,
++    l2ca_tx_cmpl,
++};
++
++
++/*****************************************************************************
++** Utilities
++*****************************************************************************/
++static tBTA_3D_STATUS convert_btm_to_3d(tBTM_STATUS btm_status)
++{
++    switch(btm_status)
++    {
++        case BTM_SUCCESS:
++            return (BTA_3D_OK);
++        case BTM_BUSY:
++            return (BTA_3D_ERR_BUSY);
++        case BTM_NO_RESOURCES:
++            return (BTA_3D_ERR_NO_RES);
++        default:
++            return (BTA_3D_ERR);
++    }
++}
++
++static void bta_3d_cmd_status(tBTA_3D_CMD cmd, tBTA_3D_STATUS status)
++{
++    tBTA_3D evt;
++    tBTA_3D_CBACK *p_cb = bta_3d_cb.p_cback;
++
++    if(p_cb)
++    {
++        evt.cmd_status.cmd    = cmd;
++        evt.cmd_status.status = status;
++
++        (*p_cb)(BTA_3D_COMMAND_STATUS_EVT, &evt);
++    }
++}
++
++static BOOLEAN bta_3d_create_record(char *service_name)
++{
++    APPL_TRACE_DEBUG("%s: Enter", __FUNCTION__);
++    BOOLEAN result       = TRUE;
++    UINT16  service_uuid = UUID_SERVCLASS_3D_DISPLAY;
++
++    bta_3d_cb.sdp_handle = SDP_CreateRecord();
++
++    result &= SDP_AddServiceClassIdList(bta_3d_cb.sdp_handle, 1, &service_uuid);
++    result &= SDP_AddProfileDescriptorList(bta_3d_cb.sdp_handle, UUID_SERVCLASS_3D_SYNC, 0x0100);
++
++    if(service_name && service_name[0] != '\0')
++        result &= SDP_AddAttribute(bta_3d_cb.sdp_handle, ATTR_ID_SERVICE_NAME, TEXT_STR_DESC_TYPE,
++                         (UINT32)(strlen(service_name)+1), (UINT8 *)service_name);
++
++    if(!result)
++    {
++        SDP_DeleteRecord(bta_3d_cb.sdp_handle);
++        bta_3d_cb.sdp_handle = 0;
++    }
++
++    APPL_TRACE_DEBUG("%s: Exit(%d)", __FUNCTION__,result);
++    return (result);
++}
++
++static void bta_3d_cleanup()
++{
++    APPL_TRACE_DEBUG("%s: Enter", __FUNCTION__);
++    BTA_Set3DEIREnabled(FALSE, 0);
++    SDP_DeleteRecord(bta_3d_cb.sdp_handle);
++    BTM_DeleteReservedLTADDR(bta_3d_cb.lt_addr);
++    BTM_DeregisterCLB();
++    L2CA_UcdDeregister(bta_3d_cb.psm);
++    L2CA_Deregister(bta_3d_cb.psm);
++    bta_3d_cb.state = BTA_3D_DISABLED;
++    APPL_TRACE_DEBUG("%s: Exit", __FUNCTION__);
++}
++
++BOOLEAN bta_3d_hdl_event(BT_HDR *p_msg)
++{
++    APPL_TRACE_DEBUG("%s: Enter(%04X)", __FUNCTION__,p_msg->event);
++    switch(p_msg->event)
++    {
++        case BTA_3D_API_ENABLE_EVT:
++            APPL_TRACE_DEBUG(" BTA_3D_API_ENABLE_EVT is %d: %04X",  BTA_3D_API_ENABLE_EVT,  BTA_3D_API_ENABLE_EVT );
++            bta_3d_api_enable((tBTA_3D_DATA *)p_msg);
++            break;
++        case BTA_3D_API_DISABLE_EVT:
++            bta_3d_api_disable();
++            break;
++        case BTA_3D_API_WRITE_SYNC_PARAM_EVT:
++            bta_3d_api_write_params((tBTA_3D_DATA *)p_msg);
++            break;
++        case BTA_3D_API_START_SYNC_TRAIN_EVT:
++            bta_3d_api_start_train();
++            break;
++        case BTA_3D_API_SET_BCAST_DATA_EVT:
++            bta_3d_api_set_bcast_data((tBTA_3D_DATA *)p_msg);
++            break;
++        case BTA_3D_API_ENABLE_BCAST_EVT:
++            bta_3d_api_enable_bcast((tBTA_3D_DATA *)p_msg);
++            break;
++        case BTA_3D_API_DISABLE_BCAST_EVT:
++            bta_3d_api_disable_bcast();
++            break;
++        case BTA_3D_API_ENABLE_CLK_CAP_EVT:
++            bta_3d_api_enable_clk_cap((tBTA_3D_DATA *)p_msg);
++            break;
++        case BTA_3D_API_DISABLE_CLK_CAP_EVT:
++            bta_3d_api_disable_clk_cap();
++            break;
++        case BTA_3D_BTM_CLB_CMD_CMPL_EVT:
++            bta_3d_btm_clb_cmd_cmpl((tBTA_3D_DATA *)p_msg);
++            break;
++        case BTA_3D_BTM_SYNC_TRAIN_CMPL_EVT:
++            bta_3d_btm_sync_train_cmpl((tBTA_3D_DATA *)p_msg);
++            break;
++        case BTA_3D_BTM_TRG_CLK_CAP_EVT:
++            bta_3d_btm_trg_clk_cap((tBTA_3D_DATA *)p_msg);
++            break;
++        case BTA_3D_BTM_SLV_PAGE_RSP_TO_EVT:
++            bta_3d_btm_slv_page_rsp_to();
++            break;
++        case BTA_3D_L2CA_UCD_DATA_EVT:
++            bta_3d_l2ca_ucd_data((tBTA_3D_DATA *)p_msg);
++            break;
++        case BTA_3D_BTM_TX_PWR_EVT:
++            bta_3d_btm_tx_pwr((tBTA_3D_DATA *)p_msg);
++            break;
++        case BTA_3D_BTM_VS_EVT:
++            bta_3d_btm_vs_evt((tBTA_3D_DATA *)p_msg);
++            break;
++        case BTA_3D_BTM_CLB_CHANNEL_CHANGE_EVT:
++            bta_3d_btm_clb_channel_change_evt();
++            break;
++        default:
++            ;//unknown
++    }
++
++    APPL_TRACE_DEBUG("%s: Exit", __FUNCTION__);
++    return (TRUE);
++}
++
++/*****************************************************************************
++** API Action Handlers
++*****************************************************************************/
++static void bta_3d_api_enable(tBTA_3D_DATA *p_data)
++{
++    tBTA_3D             evt;
++    tBTM_STATUS         btm_status;
++    tBTA_3D_STATUS      status   = BTA_3D_OK;
++    tBTA_3D_API_ENABLE *p_enable = (tBTA_3D_API_ENABLE *)p_data;
++
++    if(bta_3d_cb.state != BTA_3D_DISABLED)
++    {
++        evt.status = BTA_3D_ERR_BUSY;
++        if(p_data->api_enable.p_cback)
++            (*p_data->api_enable.p_cback)(BTA_3D_ENABLE_EVT, &evt);
++    }
++
++    memset(&bta_3d_cb, 0, sizeof(bta_3d_cb));
++
++    bta_3d_cb.state = BTA_3D_ENABLING;
++
++    APPL_TRACE_DEBUG("%s: Enter", __FUNCTION__);
++    if(p_enable->p_cback)
++    {
++        bta_3d_cb.p_cback = p_enable->p_cback;
++        
++        /* Add the SDP record */
++        if(bta_3d_create_record(p_enable->p_name))
++        {
++            /* Register callbacks. */
++            if(BTM_RegisterCLB((tBTM_CLB_CB_INFO *)&btm_clb_cb_info) == BTM_SUCCESS)
++            {
++                if(((bta_3d_cb.psm = L2CA_Register(PSM_3D_SYNC, (tL2CAP_APPL_INFO *)&l2ca_appl_info)) > 0) && (L2CA_UcdRegister(bta_3d_cb.psm, (tL2CAP_UCD_CB_INFO *)&l2ca_cb_info)) && (BTM_SetUCDSecurityLevel(FALSE, "", BTM_SEC_SERVICE_3D_SYNC, BTM_SEC_NONE, PSM_3D_SYNC, 0, 0)))
++                {
++                    /* Attempt to reserve the lt_addr. The cmd_cmpl callback 
++                     * will be used to complete the enable. */ 
++                    if((btm_status = BTM_SetReservedLTADDR(BTA_3D_LT_ADDR)) != BTM_CMD_STARTED)
++                    {
++                        status = convert_btm_to_3d(btm_status);
++                    }
++                }
++                else
++                    status = BTA_3D_ERR;
++            }
++            else
++                status = BTA_3D_ERR_BUSY;
++        }
++        else
++            status = BTA_3D_ERR_SDP;
++
++        if(status != BTA_3D_OK)
++        {
++            bta_3d_cleanup();
++
++            evt.status = status;
++
++            (*bta_3d_cb.p_cback)(BTA_3D_ENABLE_EVT, &evt);
++
++            bta_3d_cb.p_cback = NULL;
++        }
++    }
++}
++
++static void bta_3d_api_disable(void)
++{
++    tBTA_3D        evt;
++    tBTA_3D_CBACK *p_cb = bta_3d_cb.p_cback;
++
++    if(p_cb == NULL)
++        return;
++
++    bta_3d_cleanup();
++
++    evt.status = BTA_3D_OK;
++
++    (*p_cb)(BTA_3D_DISABLE_EVT, &evt);
++}
++
++static void bta_3d_api_write_params(tBTA_3D_DATA *p_data)
++{
++    tBTM_STATUS                          status;
++    tBTA_3D_API_WRITE_SYNC_TRAIN_PARAMS *p_write_params = (tBTA_3D_API_WRITE_SYNC_TRAIN_PARAMS *)p_data;
++
++    if((status = BTM_WriteSyncTrainParams(BTA_3D_LEGACY_INTERVAL_MIN_MAX_SLOTS, BTA_3D_LEGACY_INTERVAL_MIN_MAX_SLOTS, CONVERT_TO_BASEBAND_SLOTS(p_write_params->timeout), p_write_params->service_data)) != BTM_CMD_STARTED)
++        bta_3d_cmd_status(BTA_3D_CMD_WRITE_PARAMS, convert_btm_to_3d(status));
++}
++
++static void bta_3d_api_start_train(void)
++{
++    tBTM_STATUS status;
++
++    if((status = BTM_StartSyncTrain()) != BTM_CMD_STARTED)
++        bta_3d_cmd_status(BTA_3D_CMD_START_TRAIN, convert_btm_to_3d(status));
++}
++
++static void bta_3d_api_set_bcast_data(tBTA_3D_DATA *p_data)
++{
++    UINT8                       buf[BTA_3D_BCAST_DATA_BUF_SIZE];
++    UINT8                      *p_buf                           = buf;
++    UINT32                      sync_mode;
++    tBTM_STATUS                 status;
++    tBTA_3D_API_SET_BCAST_DATA *p_set_data                      = (tBTA_3D_API_SET_BCAST_DATA *)p_data;
++
++    sync_mode = p_set_data->bcast_data.instant & BTA_3D_BCAST_INSTANT_BITMASK;
++    
++    APPL_TRACE_DEBUG("Dual View: %d", p_set_data->bcast_data.dual_view);
++    if(p_set_data->bcast_data.dual_view)
++        sync_mode |= BTA_3D_BCAST_VMODE_DUAL_VIEW;
++
++    UINT32_TO_STREAM(p_buf, sync_mode);
++    UINT16_TO_STREAM(p_buf, p_set_data->bcast_data.phase);
++    UINT16_TO_STREAM(p_buf, p_set_data->bcast_data.left_open_off);
++    UINT16_TO_STREAM(p_buf, p_set_data->bcast_data.left_close_off);
++    UINT16_TO_STREAM(p_buf, p_set_data->bcast_data.right_open_off);
++    UINT16_TO_STREAM(p_buf, p_set_data->bcast_data.right_close_off);
++    UINT16_TO_STREAM(p_buf, p_set_data->bcast_data.period);
++    UINT8_TO_STREAM (p_buf, p_set_data->bcast_data.fraction);
++
++    APPL_TRACE_DEBUG("Sync: %d", p_set_data->bcast_data.instant & BTA_3D_BCAST_INSTANT_BITMASK);
++    APPL_TRACE_DEBUG("Sync_Mode: %08X", sync_mode);
++    APPL_TRACE_DEBUG("LLO: %d", p_set_data->bcast_data.left_open_off);
++    APPL_TRACE_DEBUG("LLC: %d", p_set_data->bcast_data.left_close_off);
++    APPL_TRACE_DEBUG("RLO: %d", p_set_data->bcast_data.right_open_off);
++    APPL_TRACE_DEBUG("RLC: %d", p_set_data->bcast_data.right_close_off);
++    APPL_TRACE_DEBUG("Period: %d", p_set_data->bcast_data.period);
++
++    if((status = BTM_SetCLBData(bta_3d_cb.lt_addr, HCI_CLB_FRAGMENT_SINGLE, BTA_3D_BCAST_DATA_BUF_SIZE, buf)) != BTM_CMD_STARTED)
++        bta_3d_cmd_status(BTA_3D_CMD_SET_BROADCAST_DATA, convert_btm_to_3d(status));
++}
++
++static void bta_3d_api_enable_bcast(tBTA_3D_DATA *p_data)
++{
++    tBTM_STATUS               status;
++    tBTA_3D_API_ENABLE_BCAST *p_enable = (tBTA_3D_API_ENABLE_BCAST *)p_data;
++
++    status = BTM_SetCLB(HCI_CLB_ENABLE, 
++                        bta_3d_cb.lt_addr,
++                        p_enable->low_power?HCI_CLB_LPO_ALLOWED:HCI_CLB_LPO_DISALLOWED,
++                        BTA_3D_CLB_BR_PACKETS,
++                        BTA_3D_LEGACY_INTERVAL_MIN_MAX_SLOTS,
++                        BTA_3D_LEGACY_INTERVAL_MIN_MAX_SLOTS,
++                        CONVERT_TO_BASEBAND_SLOTS(p_enable->timeout));
++
++    if(status != BTM_CMD_STARTED)
++        bta_3d_cmd_status(BTA_3D_CMD_SET_BROADCAST, convert_btm_to_3d(status));
++}
++
++static void bta_3d_api_disable_bcast(void)
++{
++    tBTM_STATUS status;
++
++    if((status = BTM_SetCLB(HCI_CLB_DISABLE, bta_3d_cb.lt_addr, 0, 0, 0, 0, 0)) != BTM_CMD_STARTED)
++        bta_3d_cmd_status(BTA_3D_CMD_SET_BROADCAST, convert_btm_to_3d(status));
++}
++
++static void bta_3d_api_enable_clk_cap(tBTA_3D_DATA *p_data)
++{
++    tBTM_STATUS                 status;
++    tBTA_3D_API_ENABLE_CLK_CAP *p_enable = (tBTA_3D_API_ENABLE_CLK_CAP *)p_data;
++
++    if((status = BTM_SetTrigClkCapture(0, HCI_CLB_ENABLE, HCI_WHICH_CLOCK_LOCAL, HCI_CLB_LPO_DISALLOWED, p_enable->filter_count)) != BTM_CMD_STARTED)
++        bta_3d_cmd_status(BTA_3D_CMD_SET_CLK_CAP, convert_btm_to_3d(status));
++}
++
++static void bta_3d_api_disable_clk_cap(void)
++{
++    tBTM_STATUS status;
++
++    if((status = BTM_SetTrigClkCapture(0, HCI_CLB_DISABLE, HCI_WHICH_CLOCK_LOCAL, 0, 0)) != BTM_CMD_STARTED)
++        bta_3d_cmd_status(BTA_3D_CMD_SET_CLK_CAP, convert_btm_to_3d(status));
++}
++
++/*****************************************************************************
++** Lower Level Callback Action Handlers
++*****************************************************************************/
++static void bta_3d_btm_clb_cmd_cmpl(tBTA_3D_DATA *p_data)
++{
++    UINT8                     cmd_status = HCI_ERR_UNSPECIFIED;
++    tBTA_3D                   evt;
++    tBTA_3D_CBACK            *p_cb       = bta_3d_cb.p_cback;
++    tBTA_3D_STATUS            status     = BTA_3D_ERR;
++    tBTA_3D_BTM_CLB_CMD_CMPL *p_cmd_cmpl = (tBTA_3D_BTM_CLB_CMD_CMPL *)p_data;
++
++    APPL_TRACE_DEBUG("%s: Enter(%d)", __FUNCTION__, p_cmd_cmpl->data.command_type);
++    if((p_cmd_cmpl->data.command_type == BTM_SET_RESERVED_LT_ADDR_CMPL) && (bta_3d_cb.state == BTA_3D_ENABLING))
++    {
++    APPL_TRACE_DEBUG("LT ADDR cmpl: %d",p_cmd_cmpl->data.data.set_reserved.status);
++        if((!p_cmd_cmpl->data.timeout) && (p_cmd_cmpl->data.data.set_reserved.status == HCI_SUCCESS)
++                && (BTM_ReadInquiryRspTxPower(btm_read_inq_rsp_tx_pwr_cmpl) == BTM_CMD_STARTED))
++        {
++            bta_3d_cb.lt_addr = p_cmd_cmpl->data.data.set_reserved.lt_addr;
++        }
++        else
++        {
++            bta_3d_cleanup();
++            evt.status = BTA_3D_ERR;
++
++            if(p_cb)
++                (*p_cb)(BTA_3D_ENABLE_EVT, &evt);
++        }
++
++
++    }
++    else
++    {
++        if(!p_cmd_cmpl->data.timeout)
++        {
++            switch(p_cmd_cmpl->data.command_type)
++            {
++                case BTM_SET_CLB_CMPL:
++                    cmd_status = p_cmd_cmpl->data.data.set_clb.status;
++                    break;
++                case BTM_START_SYNC_TRAIN_CMPL:
++                    cmd_status = p_cmd_cmpl->data.data.status;
++                    break;
++                case BTM_SET_CLB_DATA_CMPL:
++                    cmd_status = p_cmd_cmpl->data.data.set_clb_data.status;
++                    break;
++                case BTM_WRITE_SYNC_TRAIN_PARAM_CMPL:
++                    cmd_status = p_cmd_cmpl->data.data.write_param.status;
++                    break;
++                case BTM_SET_TRG_CLK_CAP_CMPL:
++                    cmd_status = p_cmd_cmpl->data.data.status;
++                    break;
++                default:
++                    //Unexpected cmd result, so break out
++                    return;
++            }
++
++            status = (cmd_status == HCI_SUCCESS)?BTA_3D_OK:BTA_3D_ERR;
++        }
++        else
++            status = BTA_3D_ERR_CMD_TIMEOUT;
++
++        bta_3d_cmd_status(p_cmd_cmpl->data.command_type, status);
++    }
++}
++
++static void bta_3d_btm_sync_train_cmpl(tBTA_3D_DATA *p_data)
++{
++    tBTA_3D                      evt;
++    tBTA_3D_CBACK               *p_cb   = bta_3d_cb.p_cback;
++    tBTA_3D_BTM_SYNC_TRAIN_CMPL *p_cmpl = (tBTA_3D_BTM_SYNC_TRAIN_CMPL *)p_data;
++
++    if(p_cb)
++    {
++        evt.train_status = p_cmpl->status;
++
++        (*p_cb)(BTA_3D_SYNC_TRAIN_CMPL_EVT, &evt);
++    }
++}
++
++static void bta_3d_btm_trg_clk_cap(tBTA_3D_DATA *p_data)
++{
++    tBTA_3D                  evt;
++    tBTA_3D_CBACK           *p_cb  = bta_3d_cb.p_cback;
++    tBTA_3D_BTM_TRG_CLK_CAP *p_cap = (tBTA_3D_BTM_TRG_CLK_CAP *)p_data;
++
++    if(p_cb)
++    {
++        evt.clk_cap.clock  = p_cap->data.clock;
++        evt.clk_cap.offset = p_cap->data.offset;
++
++        (*p_cb)(BTA_3D_CLK_CAP_EVT, &evt);
++    }
++}
++
++static void bta_3d_btm_slv_page_rsp_to(void)
++{
++    tBTA_3D_CBACK *p_cb = bta_3d_cb.p_cback;
++
++    if(p_cb)
++        (*p_cb)(BTA_3D_SLV_PAGE_RSP_TO_EVT, NULL);
++}
++
++static void bta_3d_btm_tx_pwr(tBTA_3D_DATA *p_data)
++{
++    tBTA_3D        evt;
++    UINT8          enable;
++    tBTA_3D_CBACK *p_cb   = bta_3d_cb.p_cback;
++    
++    if(p_data->tx_power.status == BTM_SUCCESS)
++    {
++        BTA_Set3DEIREnabled(TRUE, p_data->tx_power.tx_power);
++
++        //Enable Legacy Association
++        enable = 1;
++        BTM_VendorSpecificCommand(BTA_3D_LEGACY_VS_ASSOC_CMD_OCF | HCI_GRP_VENDOR_SPECIFIC, 1, &enable, btm_vs_cmpl);
++        BTM_RegisterForVSEvents(btm_vs_evt, TRUE);
++
++        evt.status      = BTA_3D_OK;
++
++        bta_3d_cb.state = BTA_3D_ENABLED;
++    }
++    else
++    {
++        evt.status = BTA_3D_ERR;
++
++        bta_3d_cleanup();
++    }
++
++    if(p_cb)
++        (*p_cb)(BTA_3D_ENABLE_EVT, &evt);
++}
++
++static void bta_3d_l2ca_ucd_data(tBTA_3D_DATA *p_data)
++{
++    UINT8         *p      = p_data->ucd_data.data;
++    UINT8          opcode;
++    tBTA_3D        evt;
++    tBTA_3D_CBACK *p_cb   = bta_3d_cb.p_cback;
++
++    STREAM_TO_UINT8(opcode, p);
++
++    switch(opcode)
++    {
++        case BTA_3D_UCD_OPCODE_CONN_ANN:
++            if(p_data->ucd_data.len >= BTA_3D_UCD_CONN_MSG_SIZE)
++            {
++                bdcpy(evt.association.bd, p_data->ucd_data.bd);
++                STREAM_TO_UINT8(evt.association.flags, p);
++                STREAM_TO_UINT8(evt.association.battery, p);
++                evt.association.legacy = FALSE;
++
++                if(p_cb)
++                    (*p_cb)(BTA_3D_ASSOCIATION_EVT, &evt);
++            }
++
++            break;
++        default:
++            APPL_TRACE_WARNING("Unknown UCD opcode: %d", opcode);
++    }
++}
++
++static void bta_3d_btm_vs_evt(tBTA_3D_DATA *p_data)
++{
++    tBTA_3D_CBACK *p_cb = bta_3d_cb.p_cback;
++    tBTA_3D evt;
++    UINT8 *p = p_data->vs_evt.data;
++    UINT8 evt_code;
++
++    STREAM_TO_UINT8(evt_code, p);
++
++    switch(evt_code)
++    {
++        case BTA_3D_LEGACY_VS_ASSOC_EVT_CODE:
++            if(p_data->vs_evt.len >= BTA_3D_LEGACY_VS_ASSOC_EVT_LEN)
++            {
++                STREAM_TO_BDADDR(evt.association.bd, p);
++                evt.association.legacy = TRUE;
++
++                if(p_cb)
++                    (*p_cb)(BTA_3D_ASSOCIATION_EVT, &evt);
++            }
++            break;
++        default:
++            ;
++    }
++}
++
++static void bta_3d_btm_clb_channel_change_evt(void)
++{
++    tBTA_3D_CBACK *p_cb = bta_3d_cb.p_cback;
++
++    if(p_cb)
++        (*p_cb) (BTA_3D_CHANNEL_CHANGE_EVT, NULL);
++}
++
++/*****************************************************************************
++** BTM Callbacks
++*****************************************************************************/
++static void btm_clb_cmd_cmpl(void *result)
++{
++    tBTM_CLB_CMD_CMPL        *p_cmpl = (tBTM_CLB_CMD_CMPL *)result;
++    tBTA_3D_BTM_CLB_CMD_CMPL *p_buf;
++
++    if(p_cmpl)
++    {
++        if((p_buf = (tBTA_3D_BTM_CLB_CMD_CMPL *)GKI_getbuf(sizeof(tBTA_3D_BTM_CLB_CMD_CMPL))) != NULL)
++        {
++            p_buf->hdr.event = BTA_3D_BTM_CLB_CMD_CMPL_EVT;
++            p_buf->data      = *p_cmpl;
++
++            bta_sys_sendmsg(p_buf);
++        }
++    }
++}
++
++static void btm_sync_train_cmpl(UINT8 status)
++{
++    tBTA_3D_BTM_SYNC_TRAIN_CMPL *p_buf;
++
++    if((p_buf = (tBTA_3D_BTM_SYNC_TRAIN_CMPL *)GKI_getbuf(sizeof(tBTA_3D_BTM_SYNC_TRAIN_CMPL))) != NULL)
++    {
++        p_buf->hdr.event = BTA_3D_BTM_SYNC_TRAIN_CMPL_EVT;
++        p_buf->status    = status;
++
++        bta_sys_sendmsg(p_buf);
++    }
++}
++
++static void btm_trg_clk_cap(tBTM_TRG_CLK_CAP *p_cap)
++{
++    tBTA_3D_BTM_TRG_CLK_CAP *p_buf;
++
++    if((p_buf = (tBTA_3D_BTM_TRG_CLK_CAP *)GKI_getbuf(sizeof(tBTA_3D_BTM_TRG_CLK_CAP))) != NULL)
++    {
++        p_buf->hdr.event = BTA_3D_BTM_TRG_CLK_CAP_EVT;
++        p_buf->data      = *p_cap;
++
++        bta_sys_sendmsg(p_buf);
++    }
++}
++
++static void btm_slave_page_response_to(void)
++{
++    BT_HDR *p_buf;
++
++    if((p_buf = (BT_HDR *)GKI_getbuf(sizeof(BT_HDR))) != NULL)
++    {
++        p_buf->event = BTA_3D_BTM_SLV_PAGE_RSP_TO_EVT;
++
++        bta_sys_sendmsg(p_buf);
++    }
++}
++
++static void btm_read_inq_rsp_tx_pwr_cmpl(void *p)
++{
++    tBTA_3D_BTM_TX_PWR     *p_buf;
++    tBTM_INQ_TXPWR_RESULTS *p_results = (tBTM_INQ_TXPWR_RESULTS *)p;
++
++    if((p_buf = (tBTA_3D_BTM_TX_PWR *)GKI_getbuf(sizeof(tBTA_3D_BTM_TX_PWR))) != NULL)
++    {
++        p_buf->hdr.event = BTA_3D_BTM_TX_PWR_EVT;
++        p_buf->status    = p_results->status;
++        p_buf->tx_power  = p_results->tx_power;
++
++        bta_sys_sendmsg(p_buf);
++    }
++}
++
++static void btm_vs_cmpl(tBTM_VSC_CMPL *p_buf)
++{
++    int i;
++
++    APPL_TRACE_DEBUG("vs_cmpl: %04X", p_buf->opcode);
++
++    for(i=0;i<p_buf->param_len;i++)
++        APPL_TRACE_DEBUG("vs_cmpl[%d]=%02X", i, p_buf->p_param_buf[i]);
++}
++
++static void btm_vs_evt(UINT8 len, UINT8 *p)
++{
++    tBTA_3D_BTM_VS_EVT *p_buf;
++
++    if((p_buf = (tBTA_3D_BTM_VS_EVT *)GKI_getbuf(sizeof(tBTA_3D_BTM_VS_EVT) + len)) != NULL)
++    {
++        p_buf->hdr.event = BTA_3D_BTM_VS_EVT;
++        p_buf->len       = len;
++        memcpy(p_buf->data, p, len);
++
++        bta_sys_sendmsg(p_buf);
++    }
++}
++
++static void btm_clb_channel_change(void)
++{
++    BT_HDR *p_buf;
++
++    if((p_buf = (BT_HDR *)GKI_getbuf(sizeof(BT_HDR))) != NULL)
++    {
++        p_buf->event = BTA_3D_BTM_CLB_CHANNEL_CHANGE_EVT;
++
++        bta_sys_sendmsg(p_buf);
++    }
++}
++/*****************************************************************************
++** UCD L2CAP Callbacks
++*****************************************************************************/
++static void l2ca_ucd_disc_cb(BD_ADDR bd, UINT8 type, UINT32 data)
++{
++    //We are only a UCD server
++}
++
++static void l2ca_ucd_data_cb(BD_ADDR bd, BT_HDR *p_buf)
++{
++    UINT8                 *p         = (UINT8 *)(p_buf + 1) + p_buf->offset;
++    tBTA_3D_L2CA_UCD_DATA *p_bta_buf;
++
++    if((p_bta_buf = (tBTA_3D_L2CA_UCD_DATA *)GKI_getbuf(sizeof(tBTA_3D_L2CA_UCD_DATA) + p_buf->len)) != NULL)
++    {
++        p_bta_buf->hdr.event = BTA_3D_L2CA_UCD_DATA_EVT;
++        bdcpy(p_bta_buf->bd, bd);
++        p_bta_buf->len = p_buf->len;
++        memcpy(p_bta_buf->data, p, p_buf->len);
++
++        bta_sys_sendmsg(p_bta_buf);
++    }
++}
++
++static void l2ca_ucd_cong_status_cb(BD_ADDR bd, BOOLEAN cong)
++{
++}
++
++/*****************************************************************************
++** Dummy L2CAP Callbacks
++*****************************************************************************/
++//XXX Note we only use UCD data, so these are all empty;
++//XXX however, we are still required to call L2CA_Register before we can
++//XXX call L2CA_UcdRegister
++static void l2ca_connect_ind(BD_ADDR bd, UINT16 lcid, UINT16 psm, UINT8 id)
++{
++}
++
++static void l2ca_connect_cfm(UINT16 lcid, UINT16 result)
++{
++}
++
++static void l2ca_connect_pnd_cb(UINT16 lcid)
++{
++}
++
++static void l2ca_config_ind(UINT16 lcid, tL2CAP_CFG_INFO *info)
++{
++}
++
++static void l2ca_config_cfm(UINT16 lcid, tL2CAP_CFG_INFO *info)
++{
++}
++
++static void l2ca_disc_ind(UINT16 lcid, BOOLEAN ack)
++{
++}
++
++static void l2ca_disc_cfm(UINT16 lcid, UINT16 result)
++{
++}
++
++static void l2ca_qos_violation_ind(BD_ADDR bd)
++{
++}
++
++static void l2ca_data_ind(UINT16 lcid, BT_HDR *p_buf)
++{
++}
++
++static void l2ca_cong_status(UINT16 lcid, BOOLEAN cong)
++{
++}
++
++static void l2ca_tx_cmpl(UINT16 lcid, UINT16 num)
++{
++}
++
++
++
++
++#endif
+diff -Naur bluedroid_qcom_5.0/bta/Android.mk bluedroid/bta/Android.mk
+--- bluedroid_qcom_5.0/bta/Android.mk	2015-08-11 14:23:02.000000000 +0800
++++ bluedroid/bta/Android.mk	2016-02-16 16:55:14.333077056 +0800
+@@ -88,6 +88,8 @@
+     ./jv/bta_jv_cfg.c \
+     ./jv/bta_jv_main.c \
+     ./jv/bta_jv_api.c \
++    ./3d/bta_3d_api.c \
++    ./3d/bta_3d_main.c
+ 
+ LOCAL_MODULE := libbt-brcm_bta
+ LOCAL_MODULE_CLASS := STATIC_LIBRARIES
+diff -Naur bluedroid_qcom_5.0/bta/dm/bta_dm_act.c bluedroid/bta/dm/bta_dm_act.c
+--- bluedroid_qcom_5.0/bta/dm/bta_dm_act.c	2015-08-11 14:23:02.000000000 +0800
++++ bluedroid/bta/dm/bta_dm_act.c	2016-02-16 16:55:14.333077056 +0800
+@@ -240,6 +240,8 @@
+ 
+ #define MAX_DISC_RAW_DATA_BUF       (4096)
+ UINT8 g_disc_raw_data_buf[MAX_DISC_RAW_DATA_BUF];
++static BOOLEAN include_3d_eir;
++static INT8    ctl_eir_tx_power;
+ 
+ /*******************************************************************************
+ **
+@@ -4238,6 +4240,35 @@
+             data_type = BTM_EIR_COMPLETE_LOCAL_NAME_TYPE;
+     }
+ 
++//XXX ifdef?
++    if(include_3d_eir)
++    {
++    APPL_TRACE_DEBUG("%s: Adding 3d", __FUNCTION__);
++        //XXX make these defines or configures
++        UINT8_TO_STREAM(p, 6);
++        UINT8_TO_STREAM(p, BTM_EIR_MANUFACTURER_SPECIFIC_TYPE);
++        UINT16_TO_STREAM(p, LMP_COMPID_BROADCOM);
++        UINT8_TO_STREAM(p, 0);
++        UINT8_TO_STREAM(p, 1);
++        UINT8_TO_STREAM(p, 100);
++
++        UINT8_TO_STREAM(p, 3);
++        UINT8_TO_STREAM(p, BTM_EIR_3D_INFO_TYPE);
++        UINT8_TO_STREAM(p, 0x07);
++        UINT8_TO_STREAM(p, 100);
++
++        free_eir_length -= 9;
++
++        if(!bta_dm_eir_cfg.bta_dm_eir_inq_tx_power)
++        {
++            UINT8_TO_STREAM(p, 2);      /* Length field */
++            UINT8_TO_STREAM(p, BTM_EIR_TX_POWER_LEVEL_TYPE);
++            UINT8_TO_STREAM(p, ctl_eir_tx_power);
++            free_eir_length -= 3;
++        }
++    }
++
++
+     UINT8_TO_STREAM(p, local_name_len + 1);
+     UINT8_TO_STREAM(p, data_type);
+ 
+@@ -4434,6 +4465,9 @@
+         UINT8_TO_STREAM(p, 0); /* terminator of significant part */
+ 
+     BTM_WriteEIR( p_buf );
++    BTM_SetInquiryScanType(BTM_SCAN_TYPE_INTERLACED);
++    BTM_SetDiscoverability(BTM_GENERAL_DISCOVERABLE, 0 , 0);
++    //BTM_SetDiscoverability(0, 0 , 0);
+ 
+ }
+ #endif
+@@ -4739,6 +4773,16 @@
+     BTM_SetAfhChannelAssessment(p_data->set_afh_channel_assessment.enable_or_disable);
+ }
+ 
++//XXX ifdef?
++void bta_dm_set_3d_eir_enabled(tBTA_DM_MSG * p_data)
++{
++    APPL_TRACE_DEBUG("%s: Enter", __FUNCTION__);
++    include_3d_eir   = ((tBTA_DM_API_SET_3D_EIR_ENABLED *)p_data)->enable;
++    ctl_eir_tx_power = ((tBTA_DM_API_SET_3D_EIR_ENABLED *)p_data)->tx_power;
++    bta_dm_set_eir(NULL);
++    APPL_TRACE_DEBUG("%s: Exit", __FUNCTION__);
++}
++
+ #if (BLE_INCLUDED == TRUE)
+ /*******************************************************************************
+ **
+diff -Naur bluedroid_qcom_5.0/bta/dm/bta_dm_api.c bluedroid/bta/dm/bta_dm_api.c
+--- bluedroid_qcom_5.0/bta/dm/bta_dm_api.c	2015-08-11 14:23:02.000000000 +0800
++++ bluedroid/bta/dm/bta_dm_api.c	2016-02-16 16:55:14.333077056 +0800
+@@ -2590,3 +2590,34 @@
+ }
+ 
+ #endif
++
++
++/*******************************************************************************
++**
++** Function         BTA_Set3DEIREnabled
++**
++** Description      Enables/disables the 3D Sync data in the EIR.
++**
++** Parameters       Boolean indicating whether to enable 3D.
++**
++** Returns          void
++**
++*******************************************************************************/
++BTA_API extern void BTA_Set3DEIREnabled (BOOLEAN enable, INT8 tx_power)
++{
++    tBTA_DM_API_SET_3D_EIR_ENABLED *p_msg;
++
++    APPL_TRACE_API("%s: Enter(%d)", __FUNCTION__,enable);
++    if((p_msg = (tBTA_DM_API_SET_3D_EIR_ENABLED *) GKI_getbuf(sizeof(tBTA_DM_API_SET_3D_EIR_ENABLED))) != NULL)
++    {
++        memset(p_msg, 0, sizeof(tBTA_DM_API_SET_3D_EIR_ENABLED));
++
++        p_msg->hdr.event = BTA_DM_API_SET_3D_EIR_ENABLED_EVT;
++        p_msg->enable    = enable;
++        p_msg->tx_power  = tx_power;
++
++        bta_sys_sendmsg(p_msg);
++    }
++    APPL_TRACE_API("%s: Exit", __FUNCTION__);
++}
++
+diff -Naur bluedroid_qcom_5.0/bta/dm/bta_dm_cfg.c bluedroid/bta/dm/bta_dm_cfg.c
+--- bluedroid_qcom_5.0/bta/dm/bta_dm_cfg.c	2015-08-11 14:23:02.000000000 +0800
++++ bluedroid/bta/dm/bta_dm_cfg.c	2016-02-16 16:55:14.333077056 +0800
+@@ -82,7 +82,7 @@
+ 
+ #ifndef BTA_AV_ROLE
+ /* By default, AV role (backward BTA_MASTER_ROLE_PREF) */
+-#define BTA_AV_ROLE BTA_MASTER_ROLE_PREF
++#define BTA_AV_ROLE BTA_MASTER_ROLE_ONLY// this is for forcing role switch to make our role is master when the conn is AV
+ #endif
+ 
+ #define BTA_DM_NUM_RM_ENTRY    4
+diff -Naur bluedroid_qcom_5.0/bta/dm/bta_dm_int.h bluedroid/bta/dm/bta_dm_int.h
+--- bluedroid_qcom_5.0/bta/dm/bta_dm_int.h	2015-08-11 14:23:02.000000000 +0800
++++ bluedroid/bta/dm/bta_dm_int.h	2016-02-16 16:55:14.333077056 +0800
+@@ -136,6 +136,7 @@
+     BTA_DM_API_DISABLE_TEST_MODE_EVT,
+     BTA_DM_API_EXECUTE_CBACK_EVT,
+     BTA_DM_API_SET_AFH_CHANNEL_ASSESMENT_EVT,
++    BTA_DM_API_SET_3D_EIR_ENABLED_EVT,
+     BTA_DM_MAX_EVT
+ };
+ 
+@@ -682,6 +683,14 @@
+     tBTA_TRANSPORT transport;
+ 
+ }tBTA_DM_API_REMOVE_ACL;
++
++typedef struct
++{
++    BT_HDR  hdr;
++    BOOLEAN enable;
++    INT8    tx_power;
++}tBTA_DM_API_SET_3D_EIR_ENABLED;
++
+ typedef struct
+ {
+     BT_HDR      hdr;
+@@ -827,6 +836,7 @@
+     tBTA_DM_API_SET_EIR_CONFIG          set_eir_cfg;
+ #endif
+     tBTA_DM_API_REMOVE_ACL              remove_acl;
++    tBTA_DM_API_SET_3D_EIR_ENABLED      set_3d_eir_enabled;
+ 
+ } tBTA_DM_MSG;
+ 
+@@ -1261,6 +1271,7 @@
+ extern void bta_dm_execute_callback(tBTA_DM_MSG *p_data);
+ 
+ extern void bta_dm_set_afh_channel_assesment(tBTA_DM_MSG *p_data);
++extern void bta_dm_set_3d_eir_enabled(tBTA_DM_MSG * p_data);
+ 
+ #endif /* BTA_DM_INT_H */
+ 
+diff -Naur bluedroid_qcom_5.0/bta/dm/bta_dm_main.c bluedroid/bta/dm/bta_dm_main.c
+--- bluedroid_qcom_5.0/bta/dm/bta_dm_main.c	2015-08-11 14:23:02.000000000 +0800
++++ bluedroid/bta/dm/bta_dm_main.c	2016-02-16 16:55:14.333077056 +0800
+@@ -131,7 +131,8 @@
+     bta_dm_enable_test_mode,    /*  BTA_DM_API_ENABLE_TEST_MODE_EVT     */
+     bta_dm_disable_test_mode,   /*  BTA_DM_API_DISABLE_TEST_MODE_EVT    */
+     bta_dm_execute_callback,     /*  BTA_DM_API_EXECUTE_CBACK_EVT        */
+-    bta_dm_set_afh_channel_assesment      /* BTA_DM_API_SET_AFH_CHANNEL_ASSESMENT_EVT */
++    bta_dm_set_afh_channel_assesment,      /* BTA_DM_API_SET_AFH_CHANNEL_ASSESMENT_EVT */
++    bta_dm_set_3d_eir_enabled   /* BTA_DM_API_SET_3D_EIR_ENABLED */
+ };
+ 
+ 
+diff -Naur bluedroid_qcom_5.0/bta/include/bta_3d_api.h bluedroid/bta/include/bta_3d_api.h
+--- bluedroid_qcom_5.0/bta/include/bta_3d_api.h	1970-01-01 08:00:00.000000000 +0800
++++ bluedroid/bta/include/bta_3d_api.h	2016-02-16 16:55:14.337077056 +0800
+@@ -0,0 +1,199 @@
++//XXX copyright header?
++#ifndef BTA_3D_API_H
++#define BTA_3D_API_H
++
++#include "bta_api.h"
++#include "btm_api.h"
++
++#define BTA_3D_ENABLE_EVT          1
++#define BTA_3D_DISABLE_EVT         2
++#define BTA_3D_ASSOCIATION_EVT     3
++#define BTA_3D_CLK_CAP_EVT         4
++#define BTA_3D_SYNC_TRAIN_CMPL_EVT 5
++#define BTA_3D_SLV_PAGE_RSP_TO_EVT 6
++#define BTA_3D_COMMAND_STATUS_EVT  7
++#define BTA_3D_CHANNEL_CHANGE_EVT  8
++
++typedef UINT16 tBTA_3D_EVT;
++
++enum
++{
++    BTA_3D_OK,
++    BTA_3D_ERR,
++    BTA_3D_ERR_SDP,
++    BTA_3D_ERR_NO_RES,
++    BTA_3D_ERR_BUSY,
++    BTA_3D_ERR_CMD_TIMEOUT
++};
++
++typedef UINT8 tBTA_3D_STATUS;
++
++typedef struct
++{
++    BD_ADDR bd;
++    UINT8   flags;
++    UINT8   battery;
++    BOOLEAN legacy;
++} tBTA_3D_ASSOC;
++
++#define BTA_3D_ASSOC_FLAGS_ASSOC         0x01
++#define BTA_3D_ASSOC_FLAGS_USER_BATT_REQ 0x02
++
++#define BTA_3D_ASSOC_BATT_LVL_NOT_SUPP   0xFF
++
++typedef struct
++{
++    UINT32 clock;
++    UINT16 offset;
++} tBTA_3D_CLK_CAP;
++
++#define BTA_3D_CMD_WRITE_PARAMS         BTM_WRITE_SYNC_TRAIN_PARAM_CMPL
++#define BTA_3D_CMD_START_TRAIN          BTM_START_SYNC_TRAIN_CMPL
++#define BTA_3D_CMD_SET_BROADCAST_DATA   BTM_SET_CLB_DATA_CMPL
++#define BTA_3D_CMD_SET_BROADCAST        BTM_SET_CLB_CMPL
++#define BTA_3D_CMD_SET_CLK_CAP          BTM_SET_TRG_CLK_CAP_CMPL
++
++typedef UINT16 tBTA_3D_CMD;
++
++typedef struct
++{
++    tBTA_3D_CMD cmd;
++    tBTA_3D_STATUS status;
++} tBTA_3D_CMD_STATUS;
++
++typedef union
++{
++    tBTA_3D_STATUS     status;         /* ENABLE_EVT          */
++    tBTA_3D_ASSOC      association;    /* ASSOCIATION_EVT     */
++    tBTA_3D_CLK_CAP    clk_cap;        /* CLK_CAP_EVT         */
++    UINT8              train_status;   /* SYNC_TRAIN_CMPL_EVT */
++    tBTA_3D_CMD_STATUS cmd_status;     /* COMMAND_STATUS      */
++} tBTA_3D;
++
++/* BTA 3D callback function. */
++typedef void (tBTA_3D_CBACK) (tBTA_3D_EVT event, tBTA_3D *p_data);
++
++typedef struct
++{
++    UINT32 instant;
++    UINT16 phase;
++    UINT16 left_open_off;
++    UINT16 left_close_off;
++    UINT16 right_open_off;
++    UINT16 right_close_off;
++    UINT16 period;
++    UINT8 fraction;
++    BOOLEAN dual_view;
++} tBTA_3D_BCAST_DATA;
++
++#ifdef __cplusplus
++extern "C"
++{
++#endif
++
++    /*******************************************************************************
++     **
++     ** Function         BTA_3dEnable
++     **
++     ** Description      This function enable 3D Display and registers the Dislpay with
++     **                  lower layers.
++     **
++     ** Returns          void
++     **
++     *******************************************************************************/
++    BTA_API extern void BTA_3dEnable(tBTA_3D_CBACK *p_cback, char *p_service_name);
++
++    /*******************************************************************************
++     **
++     ** Function         BTA_3dDisable
++     **
++     ** Description      This function is called when the host is about power down.
++     **
++     ** Returns          void
++     **
++     *******************************************************************************/
++    BTA_API extern void BTA_3dDisable(void);
++
++    /*******************************************************************************
++     **
++     ** Function         BTA_3dWriteSyncParams
++     **
++     ** Description      This function writes the Synchronization Train Parameters.
++     **                  Note, for spec-compliance the Interval is coded to 80ms internally.
++     **
++     ** Returns          void
++     **
++     *******************************************************************************/
++    BTA_API extern void BTA_3dWriteSyncTrainParams(UINT32 timeout, UINT8 service_data);
++
++    /*******************************************************************************
++     **
++     ** Function         BTA_3dStartSyncTrain
++     **
++     ** Description      This function start the synchronization train.
++     **
++     ** Returns          void
++     **
++     *******************************************************************************/
++    BTA_API extern void BTA_3dStartSyncTrain(void);
++
++    /*******************************************************************************
++     **
++     ** Function         BTA_3dSetBroadcastData
++     **
++     ** Description      This function sets the data being broadcast.
++     **
++     ** Returns          void
++     **
++     *******************************************************************************/
++    BTA_API extern void BTA_3dSetBroadcastData(tBTA_3D_BCAST_DATA *p_bcast_data);
++
++    /*******************************************************************************
++     **
++     ** Function         BTA_3dEnableBroadcasts
++     **
++     ** Description      This function enables 3D broadcasts.
++     **
++     ** Returns          void
++     **
++     *******************************************************************************/
++    BTA_API extern void BTA_3dEnableBroadcasts(UINT16 timeout, BOOLEAN low_power);
++
++    /*******************************************************************************
++     **
++     ** Function         BTA_3dDisableBroadcasts
++     **
++     ** Description      This function disables 3D broadcasts.
++     **
++     ** Returns          void
++     **
++     *******************************************************************************/
++    BTA_API extern void BTA_3dDisableBroadcasts(void);
++
++    /*******************************************************************************
++     **
++     ** Function         BTA_3dEnableClockCapture
++     **
++     ** Description      This function enabled Triggered Clock Capture.
++     **
++     ** Returns          void
++     **
++     *******************************************************************************/
++    BTA_API extern void BTA_3dEnableClockCapture(UINT8 filter_count);
++
++    /*******************************************************************************
++     **
++     ** Function         BTA_3dDisableClockCapture
++     **
++     ** Description      This function disabled Triggered Clock Capture.
++     **
++     ** Returns          void
++     **
++     *******************************************************************************/
++    BTA_API extern void BTA_3dDisableClockCapture(void);
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif
+diff -Naur bluedroid_qcom_5.0/bta/include/bta_api.h bluedroid/bta/include/bta_api.h
+--- bluedroid_qcom_5.0/bta/include/bta_api.h	2015-08-11 14:23:03.000000000 +0800
++++ bluedroid/bta/include/bta_api.h	2016-02-16 16:55:14.333077056 +0800
+@@ -86,19 +86,20 @@
+ #define BTA_MN_SERVICE_ID       26          /* Message Notification Service */
+ #define BTA_HDP_SERVICE_ID      27          /* Health Device Profile */
+ #define BTA_PCE_SERVICE_ID      28          /* PhoneBook Access Client*/
++#define BTA_3D_SERVICE_ID       29          /* 3D Sync Profile */
+ 
+ #if BLE_INCLUDED == TRUE && BTA_GATT_INCLUDED == TRUE
+ /* BLE profile service ID */
+-#define BTA_BLE_SERVICE_ID      29          /* GATT profile */
++#define BTA_BLE_SERVICE_ID      30          /* GATT profile */
+ 
+ // btla-specific ++
+-#define BTA_USER_SERVICE_ID     30          /* User requested UUID */
++#define BTA_USER_SERVICE_ID     31          /* User requested UUID */
+ 
+-#define BTA_MAX_SERVICE_ID      31
++#define BTA_MAX_SERVICE_ID      32
+ // btla-specific --
+ #else
+-#define BTA_USER_SERVICE_ID     29          /* User requested UUID */
+-#define BTA_MAX_SERVICE_ID      30
++#define BTA_USER_SERVICE_ID     30          /* User requested UUID */
++#define BTA_MAX_SERVICE_ID      31
+ #endif
+ /* service IDs (BTM_SEC_SERVICE_FIRST_EMPTY + 1) to (BTM_SEC_MAX_SERVICES - 1)
+  * are used by BTA JV */
+@@ -2629,6 +2630,22 @@
+ 
+ #endif
+ 
++//XXX ifdef?
++/*******************************************************************************
++**
++** Function         BTA_Set3DEIREnabled
++**
++** Description      Enables/disables the 3D Sync data in the EIR.
++**
++** Parameters       Boolean indicating whether to enable 3D.
++**                  Integer indicating the Tx Power to include in the EIR
++**                  if it is not coded into the cfg.
++**
++** Returns          void
++**
++*******************************************************************************/
++BTA_API extern void BTA_Set3DEIREnabled (BOOLEAN enable, INT8 tx_power);
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff -Naur bluedroid_qcom_5.0/bta/sys/bta_sys.h bluedroid/bta/sys/bta_sys.h
+--- bluedroid_qcom_5.0/bta/sys/bta_sys.h	2015-08-11 14:23:02.000000000 +0800
++++ bluedroid/bta/sys/bta_sys.h	2016-02-16 16:55:14.337077056 +0800
+@@ -96,7 +96,8 @@
+ #define BTA_ID_HL           30           /* Health Device Profile*/
+ #define BTA_ID_GATTC        31           /* GATT Client */
+ #define BTA_ID_GATTS        32           /* GATT Client */
+-#define BTA_ID_BLUETOOTH_MAX   33        /* last BT profile */
++#define BTA_ID_3D           33           /* 3D Synchronization */
++#define BTA_ID_BLUETOOTH_MAX   34        /* last BT profile */
+ 
+ /* FM */
+ #define BTA_ID_FM           34           /* FM  */
+diff -Naur bluedroid_qcom_5.0/btif/include/btif_3d.h bluedroid/btif/include/btif_3d.h
+--- bluedroid_qcom_5.0/btif/include/btif_3d.h	1970-01-01 08:00:00.000000000 +0800
++++ bluedroid/btif/include/btif_3d.h	2016-02-16 16:55:14.273077054 +0800
+@@ -0,0 +1,16 @@
++#ifndef BTIF_3D_H
++#define BTIF_3D_H
++
++#include <hardware/bluetooth.h>
++#include <stdint.h>
++#include "bta_3d_api.h"
++#include "btu.h"
++
++#define BTIF_3D_SERVICE_NAME "3D Synchronization Display" 
++
++bt_status_t btif_3d_init(void* callbacks);
++bt_status_t btif_3d_set_display_mode(bt3d_display_mode_t mode);
++bt_status_t btif_3d_set_bcast_data(bt3d_broadcast_data_t data);
++void btif_3d_cleanup(void);
++
++#endif
+diff -Naur bluedroid_qcom_5.0/btif/src/btif_3d.c bluedroid/btif/src/btif_3d.c
+--- bluedroid_qcom_5.0/btif/src/btif_3d.c	1970-01-01 08:00:00.000000000 +0800
++++ bluedroid/btif/src/btif_3d.c	2016-02-16 16:55:14.217077053 +0800
+@@ -0,0 +1,383 @@
++/************************************************************************************
++ *
++ *  Filename:      btif_3d.c
++ *
++ *  Description:   3D Sync Profile Bluetooth Interface
++ *
++ *
++ ***********************************************************************************/
++#include <hardware/bluetooth.h>
++#include <hardware/bt_3d_q.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <errno.h>
++#include <string.h>
++
++#define LOG_TAG "BTIF_3D"
++
++#include "bta_api.h"
++#include "bta_3d_api.h"
++#include "bd.h"
++#include "btif_storage.h"
++
++#include "btif_common.h"
++#include "btif_util.h"
++#include "btif_3d.h"
++#include "gki.h"
++#include "l2c_api.h"
++
++
++//Approximately 2 per second for a 60hz display
++#define FRAMES_SYNCS_PER_CAPTURE 60
++
++#define INVALID_PERIOD_REPEAT_THRESHOLD 10
++
++#define MIN_PERIOD_3D 16655
++#define MAX_PERIOD_3D 16690
++
++#define PERIOD_VALID_3D(_x) ((_x >= MIN_PERIOD_3D) && (_x <= MAX_PERIOD_3D))
++
++#define MIN_PERIOD_2D 8000
++#define MAX_PERIOD_2D 9000
++
++#define PERIOD_VALID_2D(_x) ((_x >= MIN_PERIOD_2D) && (_x <= MAX_PERIOD_2D))
++
++#define CLK_SLOT_US 625
++
++typedef struct
++{
++    uint32_t clock;
++    uint16_t offset;
++} tBTIF_3D_CLK_CAP_DATA;
++
++bt3d_callbacks_q_t *bt_3d_callbacks = NULL;
++/************************************************************************************
++**  Static variables
++************************************************************************************/
++static tBTA_3D_BCAST_DATA bcast_data;
++static BOOLEAN broadcasting;
++static TIMER_LIST_ENT clk_cap_to_tmr;
++static BOOLEAN enabled;
++static bt3d_display_mode_t current_mode = BT3D_DISPLAY_MODE_2D;
++static unsigned int invalid_count;
++
++static tBTIF_3D_CLK_CAP_DATA last_cap;
++
++static void bta_3d_evt(tBTA_3D_EVT event, tBTA_3D *data);
++
++//Called when we haven't received a Triggered Clock Capture
++//for an unexpected period of time.
++//
++//Triggers 2D mode
++static void clk_cap_to_cb(TIMER_LIST_ENT *tmr)
++{
++    BTIF_TRACE_DEBUG("Triggered Clock Capture stopped");
++    memset(&bcast_data, 0, sizeof(bcast_data));
++    memset(&last_cap, 0, sizeof(last_cap));
++    HAL_CBACK(bt_3d_callbacks, period_change_callback, 0);
++}
++
++bt_status_t btif_3d_init(void* callbacks)
++{
++    BTIF_TRACE_EVENT("%s", __FUNCTION__);
++    BTIF_TRACE_EVENT("BTIF_3D_CALL_IN: %s", __FUNCTION__);
++    bt_3d_callbacks = (bt3d_callbacks_q_t *)callbacks;
++    btif_enable_service(BTA_3D_SERVICE_ID);
++    return BT_STATUS_SUCCESS;
++}
++
++bt_status_t btif_3d_set_display_mode(bt3d_display_mode_t mode)
++{
++    bt_status_t status;
++
++    BTIF_TRACE_EVENT("%s,%d", __FUNCTION__,mode);
++    if(!enabled)
++        return BT_STATUS_NOT_READY;
++
++    switch(mode)
++    {
++        case BT3D_DISPLAY_MODE_2D:
++            BTIF_TRACE_DEBUG("Setting 22D mode");
++            //BTA_3dDisableClockCapture();
++            BTA_3dDisableBroadcasts();
++
++            btu_stop_timer(&clk_cap_to_tmr);
++            memset(&last_cap, 0, sizeof(last_cap));
++
++            status = BT_STATUS_SUCCESS;
++
++            break;
++        case BT3D_DISPLAY_MODE_3D:
++            ALOGE("Setting 3D mode");
++            BTIF_TRACE_DEBUG("Setting 3D mode");
++            if(current_mode == BT3D_DISPLAY_MODE_3D)
++                return BT_STATUS_SUCCESS;
++
++            //Start in 2D mode until we have a valid period
++            invalid_count = 0;
++            memset(&bcast_data, 0, sizeof(tBTA_3D_BCAST_DATA));
++            bcast_data.left_open_off = 0xFFFF;
++            BTA_3dSetBroadcastData(&bcast_data);
++
++            BTA_3dEnableBroadcasts(5000, 0);
++            BTA_3dStartSyncTrain();
++            //BTA_3dEnableClockCapture(FRAMES_SYNCS_PER_CAPTURE);
++
++            status = BT_STATUS_SUCCESS;
++            break;
++        default:
++            status = BT_STATUS_UNSUPPORTED;
++    }
++
++    if(status == BT_STATUS_SUCCESS)
++        current_mode = mode;
++
++    return status;
++}
++
++//XXX Reject if we aren't broadcasting?
++bt_status_t btif_3d_set_bcast_data(bt3d_broadcast_data_t data)
++{
++    BTIF_TRACE_EVENT("BTIF_3D_CALL_IN: %s", __FUNCTION__);
++    BTIF_TRACE_EVENT("BTIF_3D %d,%d,%d,%d",data.left_open_offset,data.left_close_offset,data.right_open_offset,data.right_close_offset);
++    bcast_data.left_open_off   = data.left_open_offset;
++    bcast_data.left_close_off  = data.left_close_offset;
++    bcast_data.right_open_off  = data.right_open_offset;
++    bcast_data.right_close_off = data.right_close_offset;
++    BTIF_TRACE_EVENT("DUAL_VIEW: %d", data.dual_view);
++//    bcast_data.dual_view       = data.dual_view;
++    bcast_data.dual_view = 0;
++
++    BTA_3dSetBroadcastData(&bcast_data);
++
++    return BT_STATUS_SUCCESS;
++}
++
++void btif_3d_cleanup(void)
++{
++    BTIF_TRACE_EVENT("BTIF_3D_CALL_IN: %s", __FUNCTION__);
++    if(bt_3d_callbacks)
++    {
++        bt_3d_callbacks = NULL;
++        btif_disable_service(BTA_3D_SERVICE_ID);
++    }
++}
++
++#if 0
++static const bt3d_interface_t bt3dInterface = 
++{
++    sizeof(bt3d_interface_t),
++    init,
++    set_mode,
++    broadcast_3d_data,
++    cleanup,
++};
++#endif
++
++/*******************************************************************************
++**
++** Function         btif_3d_upstreams_evt
++**
++** Description      Executes 3D UPSTREAMS events in btif context
++**
++** Returns          void
++**
++*******************************************************************************/
++static void btif_3d_upstreams_evt(UINT16 event, char* p_param)
++{
++    BTIF_TRACE_DEBUG("called btif_3d_upstreams_evt event:%d", event);
++    uint16_t  period;
++    uint16_t  period_diff;
++    uint32_t  shifted_clock;
++    uint16_t  shifted_offset;
++    uint32_t  clock_diff;
++    uint8_t   fraction;
++    tBTA_3D  *data          = (tBTA_3D *)p_param;
++    switch(event)
++    {
++        case BTA_3D_ENABLE_EVT:
++            if(data->status == BTA_3D_OK)
++            {
++                BTA_3dWriteSyncTrainParams(120000, 0);
++                BTA_3dEnableClockCapture(FRAMES_SYNCS_PER_CAPTURE);
++                enabled = TRUE;
++
++                //XXX: OAL is never calling set_mode, so do this in order to function temporarily
++                btif_3d_set_display_mode(BT3D_DISPLAY_MODE_3D);
++            }
++            else
++                BTIF_TRACE_ERROR("Enable Error: %u", data->status);
++            break;
++        case BTA_3D_DISABLE_EVT:
++            enabled = FALSE;
++            break;
++        case BTA_3D_ASSOCIATION_EVT:
++            BTIF_TRACE_DEBUG("Association: %02X, %d", data->association.flags, data->association.battery);
++            
++            HAL_CBACK(bt_3d_callbacks, conn_announcement_callback, 
++                    (bt_bdaddr_t *)&data->association.bd,
++                    ((data->association.flags & BTA_3D_ASSOC_FLAGS_ASSOC)? 1 : 0),
++                    (data->association.legacy)? 1 : 0,
++                    data->association.battery);
++#if 0
++            if((data->association.flags & BTA_3D_ASSOC_FLAGS_ASSOC) || (data->association.legacy))
++            {
++                //HAL_CBACK(bt_3d_callbacks, assos_notif_cb, (bt_bdaddr_t *)&data->association.bd);
++                
++            }
++
++            if((!data->association.legacy) && (data->association.battery != BTA_3D_ASSOC_BATT_LVL_NOT_SUPP))
++            {
++                HAL_CBACK(bt_3d_callbacks, batt_level_cb, (bt_bdaddr_t *)&data->association.bd, data->association.battery);
++            }
++#endif
++            break;
++        case BTA_3D_SLV_PAGE_RSP_TO_EVT:
++            //Start the sync train, because a device requested it
++            //(Only if we are in master mode)
++            BTIF_TRACE_DEBUG("Slave pg rsp TO received");
++            if(current_mode == BT3D_DISPLAY_MODE_3D)
++                BTA_3dStartSyncTrain();
++            break;
++        case BTA_3D_SYNC_TRAIN_CMPL_EVT:
++        case BTA_3D_CHANNEL_CHANGE_EVT:
++            BTA_3dStartSyncTrain();
++            break;
++        case BTA_3D_CLK_CAP_EVT:
++            btu_stop_timer(&clk_cap_to_tmr);
++            shifted_clock = data->clk_cap.clock >> 1;
++            BTIF_TRACE_DEBUG("CAPTURE: %d, %d", shifted_clock, data->clk_cap.offset);
++
++            if(last_cap.clock != 0)
++            {
++                clock_diff = (shifted_clock*CLK_SLOT_US + (uint32_t)data->clk_cap.offset) - (last_cap.clock*CLK_SLOT_US + (uint32_t)last_cap.offset);
++                period = (uint16_t)(clock_diff / (FRAMES_SYNCS_PER_CAPTURE + 1)); 
++                fraction = (clock_diff % (FRAMES_SYNCS_PER_CAPTURE + 1)) >> 8;
++
++                BTIF_TRACE_DEBUG("BTIF_3D_PERIOD: %d", period);
++
++                if(PERIOD_VALID_2D(period))
++                {
++                    invalid_count = 0;
++                    //Set 2D mode if we haven't already
++                    if(bcast_data.period != 0)
++                    {
++                        memset(&bcast_data, 0, sizeof(tBTA_3D_BCAST_DATA));
++                        bcast_data.left_open_off = 0xFFFF;
++                        BTA_3dSetBroadcastData(&bcast_data);
++                    }
++                }
++                else if(PERIOD_VALID_3D(period))
++                {
++                    shifted_offset = data->clk_cap.offset >> 1;
++                    invalid_count  = 0;
++
++                    // The period appears to be valid 3D
++                    // Don't update to OAL if it is the same as before
++                    if(period == bcast_data.period)
++                    {
++                        BTIF_TRACE_DEBUG("BTIF_3D period same");
++                        bcast_data.instant  = shifted_clock;
++                        bcast_data.phase = shifted_offset;
++                        BTA_3dSetBroadcastData(&bcast_data);
++                    }
++                    else
++                    {
++                        //The period has shifted, but is still seemingly valid 3D
++                        //XXX: Need to account for slight drifts due to noise if
++                        //     the problem persists an a better environment
++                        BTIF_TRACE_DEBUG("BTIF_3D update period");
++                        bcast_data.instant  = shifted_clock;
++                        bcast_data.phase = shifted_offset;
++                        bcast_data.period   = period;
++                        bcast_data.fraction = fraction;
++                        HAL_CBACK(bt_3d_callbacks, period_change_callback, period);
++                        
++                    }
++                }
++                else
++                {
++                    //This period is not a valid expected value.
++                    //We could be shifting 60hz<->120hz, or there could
++                    //be noise. Either way, just drop this period unless
++                    //we have had a number of periods in this range in a row.
++                    //If we reach the repeat threshold, drop to 2D mode
++                    if(bcast_data.period)
++                    {
++                        if(invalid_count > INVALID_PERIOD_REPEAT_THRESHOLD)
++                        {
++                            BTIF_TRACE_DEBUG("Invalid threshold reached. Drop to 2D");
++                            invalid_count = 0;
++
++                            memset(&bcast_data, 0, sizeof(tBTA_3D_BCAST_DATA));
++                            bcast_data.left_open_off = 0xFFFF;
++                            BTA_3dSetBroadcastData(&bcast_data);
++                        }
++                        else
++                        {
++                            BTIF_TRACE_DEBUG("Invalid period (%d)", invalid_count);
++                            invalid_count++;
++                        }
++                    }
++                }
++
++                clk_cap_to_tmr.param = (UINT32)clk_cap_to_cb;
++                btu_start_timer(&clk_cap_to_tmr, BTU_TTYPE_USER_FUNC, 2);
++            }
++
++            last_cap.clock  = shifted_clock;
++            last_cap.offset = data->clk_cap.offset;
++            break;
++        case BTA_3D_COMMAND_STATUS_EVT:
++            if(data->cmd_status.status != BTA_3D_OK)
++                BTIF_TRACE_ERROR("3D HCI Cmd Fail: %d, %d", data->cmd_status.cmd, data->cmd_status.status);
++            break;
++        default:
++            BTIF_TRACE_DEBUG("Unhandled 3D event: %u", event);
++    }
++}
++
++static void bta_3d_evt(tBTA_3D_EVT event, tBTA_3D *data)
++{
++    btif_transfer_context(btif_3d_upstreams_evt, event, (void *)data, sizeof(tBTA_3D), NULL);
++}
++
++/*******************************************************************************
++**
++** Function         btif_3d_execute_service
++**
++** Description      Initializes/Shuts down the service
++**
++** Returns          BT_STATUS_SUCCESS on success, BT_STATUS_FAIL otherwise
++**
++*******************************************************************************/
++bt_status_t btif_3d_execute_service(BOOLEAN b_enable)
++{
++     if (b_enable)
++     {
++          /* Enable and register with BTA-3D */
++          BTA_3dEnable(bta_3d_evt, BTIF_3D_SERVICE_NAME);
++     }
++     else {
++         /* Disable 3D */
++         BTA_3dDisable();
++     }
++     return BT_STATUS_SUCCESS;
++}
++
++#if 0
++/*******************************************************************************
++**
++** Function         btif_3d_get_interface
++**
++** Description      Get the 3d callback interface
++**
++** Returns          bt3d_interface_t
++**
++*******************************************************************************/
++const bt3d_interface_t *btif_3d_get_interface()
++{
++    BTIF_TRACE_EVENT("%s", __FUNCTION__);
++    return &bt3dInterface;
++}
++#endif
+diff -Naur bluedroid_qcom_5.0/btif/src/btif_common.c bluedroid/btif/src/btif_common.c
+--- bluedroid_qcom_5.0/btif/src/btif_common.c	1970-01-01 08:00:00.000000000 +0800
++++ bluedroid/btif/src/btif_common.c	2016-02-16 16:55:14.217077053 +0800
+@@ -0,0 +1,23 @@
++#include <stdio.h>
++#include <stdlib.h>
++#include <unistd.h>
++
++#include <hardware/bluetooth.h>
++
++#define LOG_NDDEBUG 0
++#define LOG_TAG "bluedroid"
++
++#include "btif_common.h"
++#include "btif_api.h"
++#include "bt_utils.h"
++//#include "btif_init.h"
++
++/************************************************************************************
++**  Static variables
++************************************************************************************/
++
++bt_callbacks_t *bt_hal_cbacks = NULL;
++/** Operating System specific callouts for resource management */
++bt_os_callouts_t *bt_os_callouts = NULL;
++
++
+diff -Naur bluedroid_qcom_5.0/btif/src/btif_dm.c bluedroid/btif/src/btif_dm.c
+--- bluedroid_qcom_5.0/btif/src/btif_dm.c	2015-08-11 14:23:02.000000000 +0800
++++ bluedroid/btif/src/btif_dm.c	2016-02-16 16:55:14.217077053 +0800
+@@ -226,6 +226,7 @@
+ extern bt_status_t btif_hf_execute_service(BOOLEAN b_enable);
+ extern bt_status_t btif_av_execute_service(BOOLEAN b_enable);
+ extern bt_status_t btif_hh_execute_service(BOOLEAN b_enable);
++extern bt_status_t btif_3d_execute_service(BOOLEAN b_enable);
+ extern bt_status_t btif_hf_client_execute_service(BOOLEAN b_enable);
+ extern bt_status_t btif_mce_execute_service(BOOLEAN b_enable);
+ extern int btif_hh_connect(bt_bdaddr_t *bd_addr);
+@@ -263,6 +264,10 @@
+          {
+              btif_mce_execute_service(b_enable);
+          }break;
++         case BTA_3D_SERVICE_ID:
++         {
++              btif_3d_execute_service(b_enable);
++         }break;
+          default:
+               BTIF_TRACE_ERROR("%s: Unknown service being enabled", __FUNCTION__);
+               return BT_STATUS_FAIL;
+diff -Naur bluedroid_qcom_5.0/btif/src/btif_gatt_client.c bluedroid/btif/src/btif_gatt_client.c
+--- bluedroid_qcom_5.0/btif/src/btif_gatt_client.c	2015-08-11 14:23:02.000000000 +0800
++++ bluedroid/btif/src/btif_gatt_client.c	2016-02-16 16:55:14.217077053 +0800
+@@ -2258,7 +2258,6 @@
+     btif_gattc_reg_for_notification,
+     btif_gattc_dereg_for_notification,
+     btif_gattc_read_remote_rssi,
+-    NULL,
+     btif_gattc_scan_filter_param_setup,
+     btif_gattc_scan_filter_add_remove,
+     btif_gattc_scan_filter_clear,
+@@ -2276,7 +2275,6 @@
+     btif_gattc_enb_batch_scan,
+     btif_gattc_dis_batch_scan,
+     btif_gattc_read_batch_scan_reports,
+-    NULL,
+     btif_gattc_test_command
+ };
+ 
+diff -Naur bluedroid_qcom_5.0/btif/src/btif_gatt_server.c bluedroid/btif/src/btif_gatt_server.c
+--- bluedroid_qcom_5.0/btif/src/btif_gatt_server.c	2015-08-11 14:23:02.000000000 +0800
++++ bluedroid/btif/src/btif_gatt_server.c	2016-02-16 16:55:14.217077053 +0800
+@@ -666,7 +666,6 @@
+     btif_gatts_unregister_app,
+     btif_gatts_open,
+     btif_gatts_close,
+-    NULL,
+     btif_gatts_add_service,
+     btif_gatts_add_included_service,
+     btif_gatts_add_characteristic,
+@@ -675,11 +674,7 @@
+     btif_gatts_stop_service,
+     btif_gatts_delete_service,
+     btif_gatts_send_indication,
+-    btif_gatts_send_response,
+-    NULL,
+-    NULL,
+-    NULL,
+-    NULL,
++    btif_gatts_send_response
+ };
+ 
+ #endif
+diff -Naur bluedroid_qcom_5.0/btif/src/btif_hh.c bluedroid/btif/src/btif_hh.c
+--- bluedroid_qcom_5.0/btif/src/btif_hh.c	2015-08-11 14:23:02.000000000 +0800
++++ bluedroid/btif/src/btif_hh.c	2016-02-16 16:55:14.217077053 +0800
+@@ -1694,9 +1694,6 @@
+     get_report,
+     set_report,
+     send_data,
+-    NULL,
+-    NULL,
+-    NULL,
+     cleanup
+ };
+ 
+diff -Naur bluedroid_qcom_5.0/conf/bt_stack.conf bluedroid/conf/bt_stack.conf
+--- bluedroid_qcom_5.0/conf/bt_stack.conf	2015-08-11 14:23:02.000000000 +0800
++++ bluedroid/conf/bt_stack.conf	2016-02-16 16:55:14.145077052 +0800
+@@ -1,6 +1,6 @@
+ # Enable BtSnoop logging function
+ # valid value : true, false
+-BtSnoopLogOutput=false
++BtSnoopLogOutput=true
+ 
+ # BtSnoop log output file
+ BtSnoopFileName=/sdcard/btsnoop_hci.log
+@@ -15,24 +15,24 @@
+ # Trace level configuration
+ #   BT_TRACE_LEVEL_NONE    0    ( No trace messages to be generated )
+ #   BT_TRACE_LEVEL_ERROR   1    ( Error condition trace messages )
+-#   BT_TRACE_LEVEL_WARNING 2    ( Warning condition trace messages )
++#   BT_TRACE_LEVEL_WARNING 5    ( Warning condition trace messages )
+ #   BT_TRACE_LEVEL_API     3    ( API traces )
+ #   BT_TRACE_LEVEL_EVENT   4    ( Debug messages for events )
+ #   BT_TRACE_LEVEL_DEBUG   5    ( Full debug messages )
+-#   BT_TRACE_LEVEL_VERBOSE 6    ( Verbose messages ) - Currently supported for TRC_BTAPP only.
+-TRC_BTM=2
+-TRC_HCI=2
+-TRC_L2CAP=2
+-TRC_RFCOMM=2
+-TRC_OBEX=2
+-TRC_AVCT=2
+-TRC_AVDT=2
+-TRC_AVRC=2
+-TRC_AVDT_SCB=2
+-TRC_AVDT_CCB=2
+-TRC_A2D=2
+-TRC_SDP=2
+-TRC_GATT=2
+-TRC_SMP=2
+-TRC_BTAPP=2
+-TRC_BTIF=2
++#   BT_TRACE_LEVEL_VERBOSE 5    ( Verbose messages ) - Currently supported for TRC_BTAPP only.
++TRC_BTM=5
++TRC_HCI=5
++TRC_L2CAP=5
++TRC_RFCOMM=5
++TRC_OBEX=5
++TRC_AVCT=5
++TRC_AVDT=5
++TRC_AVRC=5
++TRC_AVDT_SCB=5
++TRC_AVDT_CCB=5
++TRC_A2D=5
++TRC_SDP=5
++TRC_GATT=5
++TRC_SMP=5
++TRC_BTAPP=6
++TRC_BTIF=5
+diff -Naur bluedroid_qcom_5.0/hci/Android.mk bluedroid/hci/Android.mk
+--- bluedroid_qcom_5.0/hci/Android.mk	2015-08-11 14:23:02.000000000 +0800
++++ bluedroid/hci/Android.mk	2016-02-16 16:55:14.089077051 +0800
+@@ -14,20 +14,15 @@
+ 
+ LOCAL_CFLAGS := -Wno-unused-parameter
+ 
+-ifeq ($(BLUETOOTH_HCI_USE_MCT),true)
++#ifeq ($(BLUETOOTH_HCI_USE_USB),true)
+ 
+-LOCAL_CFLAGS += -DHCI_USE_MCT
++LOCAL_CFLAGS += -DHCI_USE_USB
+ 
+ LOCAL_SRC_FILES += \
+-	src/hci_mct.c \
+-	src/userial_mct.c
+-
+-else
+-LOCAL_SRC_FILES += \
+ 	src/hci_h4.c \
+-    src/userial.c \
+-    src/userial_usb.c
+-endif
++	src/userial_usb.c
++#endif
++
+ 
+ LOCAL_CFLAGS += -std=c99
+ 
+diff -Naur bluedroid_qcom_5.0/hci/src/bt_hci_bdroid.c bluedroid/hci/src/bt_hci_bdroid.c
+--- bluedroid_qcom_5.0/hci/src/bt_hci_bdroid.c	2015-08-11 14:23:02.000000000 +0800
++++ bluedroid/hci/src/bt_hci_bdroid.c	2016-02-16 16:55:14.089077051 +0800
+@@ -523,9 +523,9 @@
+         if (fwcfg_acked)
+         {
+             epilog_wait_timer();
+-            // Stop reading thread
+-            userial_close_reader();
+-			thread_post(hc_cb.worker_thread, event_epilog, NULL);
++            userial_usb_close();
++
++            thread_post(hc_cb.worker_thread, event_epilog, NULL);
+         }
+         thread_free(hc_cb.worker_thread);
+ 
+@@ -542,7 +542,7 @@
+     BTHCDBG("%s Finalizing cleanup\n", __func__);
+ 
+     lpm_cleanup();
+-    userial_usb_close();
++//    userial_usb_close();
+     p_hci_if->cleanup();
+     utils_cleanup();
+ 
+diff -Naur bluedroid_qcom_5.0/hci/src/userial_usb.c bluedroid/hci/src/userial_usb.c
+--- bluedroid_qcom_5.0/hci/src/userial_usb.c	2015-08-11 14:23:02.000000000 +0800
++++ bluedroid/hci/src/userial_usb.c	2016-02-16 16:55:14.089077051 +0800
+@@ -29,7 +29,6 @@
+ 
+ #define LOG_TAG "bt_usb"
+ 
+-#include <assert.h>
+ #include <utils/Log.h>
+ #include <pthread.h>
+ #include <fcntl.h>
+@@ -168,6 +167,9 @@
+ 
+ #define IS_PKT_TYPE(A, B)       ((B) & (1 << (A)))
+ #define CLEAR_PKT_TYPE(A,B)     ( *A = ((*A) & ~((1) << (B))) )
++#define CLEAR_ALL_PKT_TYPE(A)   ( *A = ((*A) & ~((1 << PACKET_TYPE_EVENT) | \
++                                        (1 << PACKET_TYPE_SCO) | \
++                                        (1 << PACKET_TYPE_ACL))) )
+ 
+ /* Used for for transferring data to/from the USB Driver */
+ typedef struct USBPacketInfo
+@@ -213,7 +215,6 @@
+     {
+         ALOGV("%s: HCI-EVENT PACKET AVAILABLE", __func__);
+         /* Save the HCI PACKET TYPE that is to be fetched */
+-        //*pbuf = PACKET_TYPE_EVENT;
+         ret = readPacket(fd, PACKET_TYPE_EVENT, pbuf);
+         if (ret > 0) {
+             /* Clear the EVENT packet type in the bit mask */
+@@ -233,10 +234,6 @@
+                 ALOGE("%s: IGNORE UNKNOWN EVENT PACKET <0x%2x>", __func__, pbuf[1]);
+                 return 0;
+             }
+-			else
+-				ALOGE("%s: RECVD HCI EVENT CODE IS: 0x%x", __func__, pbuf[1]);
+-            /* Increment one byte extra for the HCI Pkt Indicator */
+-            ret;
+         }
+ 
+         /* Check if any pending packet to be read */
+@@ -249,13 +246,10 @@
+     {
+         ALOGV("%s: BT-SCO PACKET AVAILABLE", __func__);
+         /* Save the HCI PACKET TYPE that is to be fetched */
+-        *pbuf = PACKET_TYPE_SCO;
+-        ret = readPacket(fd, PACKET_TYPE_SCO, pbuf+1);
++        ret = readPacket(fd, PACKET_TYPE_SCO, pbuf);
+         if (ret > 0) {
+             /* Clear the SCO packet type in the bit mask */
+             CLEAR_PKT_TYPE(pkt_type, PACKET_TYPE_SCO);
+-            /* Increment one byte extra for the HCI Pkt Indicator */
+-            ret++;
+             ALOGV("%s: Retrieved %d bytes of SCO data from driver", __func__, ret);
+         }
+ 
+@@ -269,11 +263,9 @@
+     {
+         ALOGV("%s: BT-ACL PACKET AVAILABLE", __func__);
+         /* Save the HCI PACKET TYPE that is to be fetched */
+-        //*pbuf = PACKET_TYPE_ACL;
+         ret = readPacket(fd, PACKET_TYPE_ACL, pbuf);
+         if (ret > 0) {
+             CLEAR_PKT_TYPE(pkt_type, PACKET_TYPE_ACL);
+-            ret;
+             ALOGV("%s: Retrieved %d bytes of ACL data from driver", __func__, ret);
+         }
+ 
+@@ -286,6 +278,10 @@
+     else
+         ALOGE("%s: Unkown Packet type: %d", __func__, *pkt_type);
+ 
++    if (ret < 0) {
++        CLEAR_ALL_PKT_TYPE(pkt_type);
++    }
++
+     return ret;
+ }
+ 
+@@ -353,7 +349,7 @@
+ {
+     if (sig == SIGUSR2) {
+         ALOGE("%s: Recvd. SIGUSR2 and hence terminating", __func__);
+-        pthread_exit(0);
++        //pthread_exit(0);
+     }
+     else
+         ALOGE("%s: Recvd. signal: %d", __func__, sig);
+@@ -446,6 +442,7 @@
+     } /* for */
+ 
+     userial_running = 0;
++    vendor_send_command(BT_VND_OP_USERIAL_CLOSE, NULL);
+     ALOGE("%s: Leaving userial_read_thread()", __func__);
+     pthread_exit(NULL);
+ 
+@@ -653,35 +650,6 @@
+     return ((uint16_t)total);
+ }
+ 
+-void userial_close_reader(void) {       
+-
+-#if 0
+-    // Join the reader thread if it is still running.
+-    if (userial_running) {              
+-        send_event(USERIAL_RX_EXIT);    
+-        int result = pthread_join(userial_cb.read_thread, NULL);
+-        USERIALDBG("%s Joined userial reader thread: %d", __func__, result);
+-        if (result)                     
+-            ALOGE("%s failed to join reader thread: %d", __func__, result);
+-        return;
+-    }
+-    ALOGW("%s Already closed userial reader thread", __func__);
+-#else
+-    int result;
+-    if (userial_running) {
+-        /* Signal userial_read_thread about port close */
+-        ALOGE("%s: Signalling the read thread about BT shutdown", __func__);
+-        pthread_kill(userial_cb.read_thread, SIGUSR2);
+-    }
+-
+-    if ((result=pthread_join(userial_cb.read_thread, NULL)) < 0)
+-        ALOGE( "pthread_join() FAILED result:%d", result);
+-
+-    ALOGW("%s Already closed userial reader thread", __func__);
+-#endif
+-}
+-
+-
+ /*******************************************************************************
+ **
+ ** Function        userial_close
+@@ -693,15 +661,11 @@
+ *******************************************************************************/
+ void userial_usb_close(void)
+ {
+-    assert(bt_hc_cbacks != NULL);
+-
+     int result;
+     TRANSAC p_buf;
+ 
+     ALOGE("userial_usb_close(fd:%d)", userial_cb.fd);
+ 
+-#if 0
+-
+     if (userial_running) {
+         /* Signal userial_read_thread about port close */
+         ALOGE("%s: Signalling the read thread about BT shutdown", __func__);
+@@ -711,8 +675,6 @@
+     if ((result=pthread_join(userial_cb.read_thread, NULL)) < 0)
+         ALOGE( "pthread_join() FAILED result:%d", result);
+ 
+-#endif
+-
+     /* Calling vendor-specific part */
+     ALOGE("%s: Calling vendor specific part to close the handle to USB driver", __func__);
+     vendor_send_command(BT_VND_OP_USERIAL_CLOSE, NULL);
+@@ -727,3 +689,4 @@
+         }
+     }
+ }
++
+diff -Naur bluedroid_qcom_5.0/include/bt_target.h bluedroid/include/bt_target.h
+--- bluedroid_qcom_5.0/include/bt_target.h	2015-08-11 14:23:03.000000000 +0800
++++ bluedroid/include/bt_target.h	2016-02-16 16:55:14.201077053 +0800
+@@ -171,6 +171,10 @@
+ #define BTA_AV_SINK_INCLUDED FALSE
+ #endif
+ 
++#ifndef BTA_3D_INCLUDED
++#define BTA_3D_INCLUDED TRUE
++#endif
++
+ #ifndef BTA_DISABLE_DELAY
+ #define BTA_DISABLE_DELAY 200 /* in milliseconds */
+ #endif
+@@ -926,8 +930,12 @@
+ * MINOR_CLASS:0x0C - SMART_PHONE
+ *
+ */
++//XXX: Change this to a rendering display in order to function as a 3DD with legacy 3DGs
++//     If this causes issues with other devices, we will need to visit other options.
++//     (Reference table 12.1 of the 3DS specification)
+ #ifndef BTA_DM_COD
+-#define BTA_DM_COD {0x5A, 0x02, 0x0C}
++//#define BTA_DM_COD {0x5A, 0x02, 0x0C}
++#define BTA_DM_COD {0x08, 0x04, 0x3C}
+ #endif
+ 
+ /* The number of SCO links. */
+@@ -1203,7 +1211,8 @@
+ 
+ /* Unicast Connectionless Data */
+ #ifndef L2CAP_UCD_INCLUDED
+-#define L2CAP_UCD_INCLUDED                  FALSE
++//#define L2CAP_UCD_INCLUDED                  FALSE
++#define L2CAP_UCD_INCLUDED                  TRUE
+ #endif
+ 
+ /* Unicast Connectionless Data MTU */
+diff -Naur bluedroid_qcom_5.0/main/Android.mk bluedroid/main/Android.mk
+--- bluedroid_qcom_5.0/main/Android.mk	2015-08-11 14:23:02.000000000 +0800
++++ bluedroid/main/Android.mk	2016-02-16 16:55:14.301077055 +0800
+@@ -8,7 +8,7 @@
+ 
+ # HAL layer
+ LOCAL_SRC_FILES:= \
+-	../btif/src/bluetooth.c
++	../btif/src/btif_common.c
+ 
+ # platform specific
+ LOCAL_SRC_FILES += \
+@@ -46,7 +46,8 @@
+ 	../btif/src/btif_sock_thread.c \
+ 	../btif/src/btif_sock_util.c \
+ 	../btif/src/btif_storage.c \
+-	../btif/src/btif_util.c
++	../btif/src/btif_util.c \
++    ../btif/src/btif_3d.c
+ 
+ # callouts
+ LOCAL_SRC_FILES += \
+@@ -101,7 +102,8 @@
+ 	$(LOCAL_PATH)/../audio_a2dp_hw \
+ 	$(LOCAL_PATH)/../utils/include \
+ 	$(bdroid_C_INCLUDES) \
+-	external/tinyxml2
++	external/tinyxml2 \
++    hardware/libhardware/include/hardware
+ 
+ LOCAL_CFLAGS += -DBUILDCFG $(bdroid_CFLAGS) -Wno-error=maybe-uninitialized -Wno-error=uninitialized -Wno-error=unused-parameter
+ LOCAL_CONLYFLAGS := -std=c99
+@@ -117,6 +119,7 @@
+ endif
+ 
+ LOCAL_SHARED_LIBRARIES := \
++	$(if $(filter true,$(BLUETOOTH_HCI_USE_USB)),libusb) \
+ 	libcutils \
+ 	libdl \
+ 	liblog \
+@@ -133,8 +136,8 @@
+ 	libtinyxml2 \
+ 	libbt-qcom_sbc_decoder
+ 
+-LOCAL_MODULE := bluetooth.default
+-LOCAL_MODULE_RELATIVE_PATH := hw
++LOCAL_MODULE := libbt-qcom_main
++#LOCAL_MODULE_RELATIVE_PATH := hw
+ LOCAL_MODULE_TAGS := optional
+ LOCAL_MODULE_CLASS := SHARED_LIBRARIES
+ LOCAL_REQUIRED_MODULES := \
+diff -Naur bluedroid_qcom_5.0/stack/btm/btm_devctl.c bluedroid/stack/btm/btm_devctl.c
+--- bluedroid_qcom_5.0/stack/btm/btm_devctl.c	2015-08-11 14:23:02.000000000 +0800
++++ bluedroid/stack/btm/btm_devctl.c	2016-02-16 16:55:14.421077057 +0800
+@@ -138,6 +138,7 @@
+ *******************************************************************************/
+ void btm_dev_init (void)
+ {
++    int xx;
+ #if 0  /* cleared in btm_init; put back in if called from anywhere else! */
+     memset (&btm_cb.devcb, 0, sizeof (tBTM_DEVCB));
+ #endif
+@@ -151,6 +152,9 @@
+     btm_cb.devcb.rln_timer.param    = (TIMER_PARAM_TYPE)TT_DEV_RLN;
+     btm_cb.devcb.rlinkp_timer.param = (TIMER_PARAM_TYPE)TT_DEV_RLNKP;
+ 
++    for(xx = 0; xx < BTM_MAX_CLB_TIMERS; xx++)
++        btm_cb.devcb.clb_cmd_timers[xx].param = (TIMER_PARAM_TYPE)TT_DEV_CLB_PARAM(xx);
++
+     btm_cb.btm_acl_pkt_types_supported = BTM_ACL_PKT_TYPES_MASK_DH1 + BTM_ACL_PKT_TYPES_MASK_DM1 +
+                                          BTM_ACL_PKT_TYPES_MASK_DH3 + BTM_ACL_PKT_TYPES_MASK_DM3 +
+                                          BTM_ACL_PKT_TYPES_MASK_DH5 + BTM_ACL_PKT_TYPES_MASK_DM5;
+@@ -598,6 +602,8 @@
+ *******************************************************************************/
+ void btm_dev_timeout (TIMER_LIST_ENT  *p_tle)
+ {
++    tBTM_CLB_CMD_CMPL clb_cmd_cmpl;
++
+     TIMER_PARAM_TYPE timer_type = (TIMER_PARAM_TYPE)p_tle->param;
+ 
+     if ((timer_type & TT_DEV_RESET_MASK) == TT_DEV_RESET)
+@@ -614,6 +620,16 @@
+         if (p_cb)
+             (*p_cb)((void *) NULL);
+     }
++    else if ((timer_type & TT_DEV_RESET_MASK) == TT_DEV_CLB)
++    {
++        tBTM_CMPL_CB *p_cb = btm_cb.devcb.clb_cb_info.p_cmd_cmpl_cb;
++
++        clb_cmd_cmpl.command_type = TT_DEV_CLB_TYPE(timer_type);
++        clb_cmd_cmpl.timeout      = TRUE;
++
++        if(p_cb)
++            (*p_cb)(&clb_cmd_cmpl);
++    }
+ }
+ 
+ /*******************************************************************************
+@@ -2490,4 +2506,389 @@
+         (*p_cb)(status);
+ }
+ 
++/*******************************************************************************
++**
++** Function         BTM_RegisterCLB
++**
++** Description      Register CLB callbacks.
++**
++** Returns          BTM_SUCCESS if successful, otherwise an error
++**
++**
++*******************************************************************************/
++tBTM_STATUS BTM_RegisterCLB(tBTM_CLB_CB_INFO *p_clb_cb_info)
++{
++    if (btm_cb.devcb.clb_cb_info.p_cmd_cmpl_cb)
++        return (BTM_BUSY);
++
++    btm_cb.devcb.clb_cb_info = *p_clb_cb_info;
++
++    return (BTM_SUCCESS);
++}
++
++/*******************************************************************************
++**
++** Function         BTM_DeregisterCLB
++**
++** Description      De-Register CLB callbacks.
++**
++** Returns          BTM_SUCCESS if successful, otherwise an error
++**
++**
++*******************************************************************************/
++tBTM_STATUS BTM_DeregisterCLB(void)
++{
++    memset(&btm_cb.devcb.clb_cb_info, 0, sizeof(tBTM_CLB_CB_INFO));
++
++    return (BTM_SUCCESS);
++}
++
++/*******************************************************************************
++**
++** Function         BTM_SetCLB
++**
++** Description      Enable/Disable Connectionless Slave Broadcasts
++**
++** Returns          BTM_SUCCESS if successful, otherwise an error
++**
++**
++*******************************************************************************/
++tBTM_STATUS BTM_SetCLB(UINT8 enable, UINT8 lt_addr, UINT8 lpo_allowed, 
++                                   UINT16 packet_type, UINT16 interval_min, 
++                                   UINT16 interval_max, UINT16 supervision_timeout) 
++{
++    if (btm_cb.devcb.clb_cmd_timers[BTM_SET_CLB_CMPL].in_use)
++        return (BTM_BUSY);
++
++    if (btsnd_hcic_set_clb(enable, lt_addr, lpo_allowed, packet_type, interval_min, interval_max, supervision_timeout))
++    {
++        btu_start_timer (&btm_cb.devcb.clb_cmd_timers[BTM_SET_CLB_CMPL], BTU_TTYPE_BTM_DEV_CTL, BTM_DEV_REPLY_TIMEOUT);
++
++        return (BTM_CMD_STARTED);
++    }
++    else
++        return (BTM_NO_RESOURCES);
++}
++
++void btm_set_clb_complete(UINT8 *p)
++{
++    tBTM_CMPL_CB *p_cb = btm_cb.devcb.clb_cb_info.p_cmd_cmpl_cb;
++    tBTM_CLB_CMD_CMPL results;
++
++    btu_stop_timer(&btm_cb.devcb.clb_cmd_timers[BTM_SET_CLB_CMPL]);
++
++    if(p_cb)
++    {
++        results.command_type = BTM_SET_CLB_CMPL;
++        results.timeout      = FALSE;
++
++        STREAM_TO_UINT8(results.data.set_clb.status, p);
++        STREAM_TO_UINT8(results.data.set_clb.lt_addr, p);
++        STREAM_TO_UINT16(results.data.set_clb.interval, p);
++
++        (*p_cb)(&results);
++    }
++}
++
++/*******************************************************************************
++**
++** Function         BTM_StartSyncTrain
++**
++** Description      Start the Synchronization Train
++**
++** Returns          BTM_SUCCESS if successful, otherwise an error
++**
++**
++*******************************************************************************/
++tBTM_STATUS BTM_StartSyncTrain(void)
++{
++    if (btm_cb.devcb.clb_cmd_timers[BTM_START_SYNC_TRAIN_CMPL].in_use)
++        return (BTM_BUSY);
++
++    if (btsnd_hcic_start_sync_train())
++    {
++        btu_start_timer (&btm_cb.devcb.clb_cmd_timers[BTM_START_SYNC_TRAIN_CMPL], BTU_TTYPE_BTM_DEV_CTL, BTM_DEV_REPLY_TIMEOUT);
++
++        return (BTM_CMD_STARTED);
++    }
++    else
++        return (BTM_NO_RESOURCES);
++}
++
++void btm_start_sync_train_complete(UINT8 *p)
++{
++    tBTM_CMPL_CB      *p_cb    = btm_cb.devcb.clb_cb_info.p_cmd_cmpl_cb;
++    tBTM_CLB_CMD_CMPL  results;
++
++    btu_stop_timer(&btm_cb.devcb.clb_cmd_timers[BTM_START_SYNC_TRAIN_CMPL]);
++
++    if(p_cb)
++    {
++        results.command_type = BTM_START_SYNC_TRAIN_CMPL;
++        results.timeout      = FALSE;
++        
++        STREAM_TO_UINT8(results.data.status, p);
++
++        (*p_cb)(&results);
++    }
++}
++
++void btm_sync_train_complete(UINT8 *p)
++{
++    UINT8                    status;
++    tBTM_SYNC_TRAIN_CMPL_CB *p_cb   = btm_cb.devcb.clb_cb_info.p_sync_train_cmpl_cb;
++
++    if(p_cb)
++    {
++        STREAM_TO_UINT8(status, p);
++        
++        (*p_cb)(status);
++    }
++}
++
++/*******************************************************************************
++**
++** Function         BTM_SetReservedLTADDR
++**
++** Description      Set a reserved LT_ADDR
++**
++** Returns          BTM_SUCCESS if successful, otherwise an error
++**
++**
++*******************************************************************************/
++tBTM_STATUS BTM_SetReservedLTADDR(UINT8 lt_addr)
++{
++    BTM_TRACE_API("%s: Enter", __FUNCTION__);
++    if (btm_cb.devcb.clb_cmd_timers[BTM_SET_RESERVED_LT_ADDR_CMPL].in_use)
++        return (BTM_BUSY);
++
++    if (btsnd_hcic_set_reserved_lt_addr(lt_addr))
++    {
++        btu_start_timer (&btm_cb.devcb.clb_cmd_timers[BTM_SET_RESERVED_LT_ADDR_CMPL], BTU_TTYPE_BTM_DEV_CTL, BTM_DEV_REPLY_TIMEOUT);
++
++        return (BTM_CMD_STARTED);
++    }
++    else
++        return (BTM_NO_RESOURCES);
++    BTM_TRACE_API("%s: Exit", __FUNCTION__);
++}
++
++/*******************************************************************************
++**
++** Function         BTM_DeleteReservedLTADDR
++**
++** Description      Delete a reserved LT_ADDR
++**
++** Returns          BTM_SUCCESS if successful, otherwise an error
++**
++**
++*******************************************************************************/
++tBTM_STATUS BTM_DeleteReservedLTADDR(UINT8 lt_addr)
++{
++    if (btm_cb.devcb.clb_cmd_timers[BTM_SET_RESERVED_LT_ADDR_CMPL].in_use)
++        return (BTM_BUSY);
++
++    if (btsnd_hcic_delete_reserved_lt_addr(lt_addr))
++    {
++        btu_start_timer (&btm_cb.devcb.clb_cmd_timers[BTM_SET_RESERVED_LT_ADDR_CMPL], BTU_TTYPE_BTM_DEV_CTL, BTM_DEV_REPLY_TIMEOUT);
++
++        return (BTM_CMD_STARTED);
++    }
++    else
++        return (BTM_NO_RESOURCES);
++}
++
++void btm_set_reserved_lt_addr_complete(UINT8 *p)
++{
++    BTM_TRACE_API("%s: Enter", __FUNCTION__);
++    tBTM_CMPL_CB      *p_cb    = btm_cb.devcb.clb_cb_info.p_cmd_cmpl_cb;
++    tBTM_CLB_CMD_CMPL  results;
++
++    btu_stop_timer(&btm_cb.devcb.clb_cmd_timers[BTM_SET_RESERVED_LT_ADDR_CMPL]);
++
++    BTM_TRACE_API("M1");
++    if(p_cb)
++    {
++    BTM_TRACE_API("M2");
++        results.command_type = BTM_SET_RESERVED_LT_ADDR_CMPL;
++        results.timeout      = FALSE;
++
++    BTM_TRACE_API("M3");
++        STREAM_TO_UINT8(results.data.set_reserved.status, p);
++        STREAM_TO_UINT8(results.data.set_reserved.lt_addr, p);
++
++    BTM_TRACE_API("M4");
++        (*p_cb)(&results);
++    }
++    else
++    BTM_TRACE_API("M5");
++    BTM_TRACE_API("%s: Exit", __FUNCTION__);
++}
++
++/*******************************************************************************
++**
++** Function         BTM_SetCLBData
++**
++** Description      Set the Connectionless Slave Broadcast data
++**
++** Returns          BTM_SUCCESS if successful, otherwise an error
++**
++**
++*******************************************************************************/
++tBTM_STATUS BTM_SetCLBData(UINT8 lt_addr, UINT8 fragment, UINT8 data_len, UINT8 *data)
++{
++    if (btm_cb.devcb.clb_cmd_timers[BTM_SET_CLB_DATA_CMPL].in_use)
++        return (BTM_BUSY);
++
++    if (btsnd_hcic_set_clb_data(lt_addr, fragment, data_len, data))
++    {
++        btu_start_timer (&btm_cb.devcb.clb_cmd_timers[BTM_SET_CLB_DATA_CMPL], BTU_TTYPE_BTM_DEV_CTL, BTM_DEV_REPLY_TIMEOUT);
++
++        return (BTM_CMD_STARTED);
++    }
++    else
++        return (BTM_NO_RESOURCES);
++}
++
++void btm_set_clb_data_complete(UINT8 *p)
++{
++    tBTM_CMPL_CB      *p_cb    = btm_cb.devcb.clb_cb_info.p_cmd_cmpl_cb;
++    tBTM_CLB_CMD_CMPL  results;
++
++    btu_stop_timer(&btm_cb.devcb.clb_cmd_timers[BTM_SET_CLB_DATA_CMPL]);
++
++    if(p_cb)
++    {
++        results.command_type = BTM_SET_CLB_DATA_CMPL;
++        results.timeout      = FALSE;
++
++        STREAM_TO_UINT8(results.data.set_clb_data.status, p);
++        STREAM_TO_UINT8(results.data.set_clb_data.lt_addr, p);
++
++        (*p_cb)(&results);
++    }
++}
++
++/*******************************************************************************
++**
++** Function         BTM_WriteSyncTrainParams
++**
++** Description      Write the Synchronization Train Parameters
++**
++** Returns          BTM_SUCCESS if successful, otherwise an error
++**
++**
++*******************************************************************************/
++tBTM_STATUS BTM_WriteSyncTrainParams(UINT16 interval_min, UINT16 interval_max, UINT32 timeout, UINT8 service_data)
++{
++    if (btm_cb.devcb.clb_cmd_timers[BTM_WRITE_SYNC_TRAIN_PARAM_CMPL].in_use)
++        return (BTM_BUSY);
++
++    if (btsnd_hcic_write_sync_train_params(interval_min, interval_max, timeout, service_data))
++    {
++        btu_start_timer (&btm_cb.devcb.clb_cmd_timers[BTM_WRITE_SYNC_TRAIN_PARAM_CMPL], BTU_TTYPE_BTM_DEV_CTL, BTM_DEV_REPLY_TIMEOUT);
++
++        return (BTM_CMD_STARTED);
++    }
++    else
++        return (BTM_NO_RESOURCES);
++}
++
++void btm_write_sync_train_params_complete(UINT8 *p)
++{
++    tBTM_CMPL_CB      *p_cb    = btm_cb.devcb.clb_cb_info.p_cmd_cmpl_cb;
++    tBTM_CLB_CMD_CMPL  results;
++
++    btu_stop_timer(&btm_cb.devcb.clb_cmd_timers[BTM_WRITE_SYNC_TRAIN_PARAM_CMPL]);
++
++    if(p_cb)
++    {
++        results.command_type = BTM_WRITE_SYNC_TRAIN_PARAM_CMPL;
++        results.timeout      = FALSE;
++
++        STREAM_TO_UINT8(results.data.write_param.status, p);
++        STREAM_TO_UINT16(results.data.write_param.interval, p);
++
++        (*p_cb)(&results);
++    }
++}
++
++/*******************************************************************************
++**
++** Function         BTM_SetTrigClkCapture
++**
++** Description      Start/Stop Triggered Clock Capture
++**
++** Returns          BTM_SUCCESS if successful, otherwise an error
++**                  If ENABLED, capture events will be sent to the
++**                  p_trg_clk_cap_cb.
++**
++**
++*******************************************************************************/
++tBTM_STATUS BTM_SetTrigClkCapture(UINT16 handle, UINT8 enable,
++                                    UINT8 which_clock, UINT8 lpo_allowed,
++                                    UINT8 num_clock_cap_to_filter)
++{
++    if (btm_cb.devcb.clb_cmd_timers[BTM_SET_TRG_CLK_CAP_CMPL].in_use)
++        return (BTM_BUSY);
++
++    if (btsnd_hcic_set_trig_clk_capture(handle, enable, which_clock, lpo_allowed, num_clock_cap_to_filter))
++    {
++        btu_start_timer (&btm_cb.devcb.clb_cmd_timers[BTM_SET_TRG_CLK_CAP_CMPL], BTU_TTYPE_BTM_DEV_CTL, BTM_DEV_REPLY_TIMEOUT);
++
++        return (BTM_CMD_STARTED);
++    }
++    else
++        return (BTM_NO_RESOURCES);
++}
++
++void btm_set_trg_clk_capture_complete(UINT8 *p)
++{
++    tBTM_CMPL_CB      *p_cb    = btm_cb.devcb.clb_cb_info.p_cmd_cmpl_cb;
++    tBTM_CLB_CMD_CMPL  results;
++
++    btu_stop_timer(&btm_cb.devcb.clb_cmd_timers[BTM_SET_TRG_CLK_CAP_CMPL]);
++
++    if(p_cb)
++    {
++        results.command_type = BTM_SET_TRG_CLK_CAP_CMPL;
++        results.timeout      = FALSE;
++
++        STREAM_TO_UINT8(results.data.status, p);
++
++        (*p_cb)(&results);
++    }
++}
++
++void btm_trg_clk_capture(UINT8 *p)
++{
++    tBTM_TRG_CLK_CAP_CB *p_cb    = btm_cb.devcb.clb_cb_info.p_trg_clk_cap_cb;
++    tBTM_TRG_CLK_CAP     results;
++
++    if(p_cb)
++    {
++        STREAM_TO_UINT16(results.handle, p);
++        STREAM_TO_UINT8(results.which_clock, p);
++        STREAM_TO_UINT32(results.clock, p);
++        STREAM_TO_UINT16(results.offset, p);
++
++        (*p_cb)(&results);
++    }
++}
++
++void btm_slv_page_rsp_to(void)
++{
++    tBTM_SLV_PAGE_RSP_TO_CB *p_cb = btm_cb.devcb.clb_cb_info.p_slv_page_rsp_to_cb;
++
++    if(p_cb)
++        (*p_cb)();
++}
++
++void btm_clb_channel_map_change(UINT8 *p)
++{
++    tBTM_CLB_CHANNEL_CHANGE_CB *p_cb = btm_cb.devcb.clb_cb_info.p_clb_channel_change_cb;
++
++    if(p_cb)
++        (*p_cb) ();
++}
+ 
+diff -Naur bluedroid_qcom_5.0/stack/btm/btm_inq.c bluedroid/stack/btm/btm_inq.c
+--- bluedroid_qcom_5.0/stack/btm/btm_inq.c	2015-08-11 14:23:02.000000000 +0800
++++ bluedroid/stack/btm/btm_inq.c	2016-02-16 16:56:12.033078112 +0800
+@@ -183,7 +183,7 @@
+     BOOLEAN      is_limited;
+     BOOLEAN      cod_limited;
+ 
+-    BTM_TRACE_API ("BTM_SetDiscoverability");
++    BTM_TRACE_API ("BTM_SetDiscoverability inq_mode:%d", inq_mode);
+ #if (BLE_INCLUDED == TRUE && BLE_INCLUDED == TRUE)
+     if (HCI_LE_HOST_SUPPORTED(btm_cb.devcb.local_lmp_features[HCI_EXT_FEATURES_PAGE_1]))
+     {
+@@ -311,7 +311,7 @@
+ tBTM_STATUS BTM_SetInquiryScanType (UINT16 scan_type)
+ {
+ 
+-    BTM_TRACE_API ("BTM_SetInquiryScanType");
++    BTM_TRACE_API("BTM_SetInquiryScanType %d",scan_type);
+     if (scan_type != BTM_SCAN_TYPE_STANDARD && scan_type != BTM_SCAN_TYPE_INTERLACED)
+         return (BTM_ILLEGAL_VALUE);
+ 
+@@ -325,12 +325,19 @@
+         if (BTM_IsDeviceUp())
+         {
+             if (btsnd_hcic_write_inqscan_type ((UINT8)scan_type))
++            {
+                 btm_cb.btm_inq_vars.inq_scan_type = scan_type;
++                BTM_TRACE_API("after btsnd_hcic_write_inquscan_type");
++            }
+             else
+                 return (BTM_NO_RESOURCES);
+         }
+         else return (BTM_WRONG_MODE);
+     }
++    else
++    {
++        BTM_TRACE_API("scan_type is the same");
++    }
+     return (BTM_SUCCESS);
+ }
+ 
+diff -Naur bluedroid_qcom_5.0/stack/btm/btm_int.h bluedroid/stack/btm/btm_int.h
+--- bluedroid_qcom_5.0/stack/btm/btm_int.h	2015-08-11 14:23:02.000000000 +0800
++++ bluedroid/stack/btm/btm_int.h	2016-02-16 16:55:14.417077057 +0800
+@@ -134,6 +134,10 @@
+ #define TT_DEV_RESET     1
+ #define TT_DEV_RLN       2
+ #define TT_DEV_RLNKP     4              /* Read Link Policy Settings */
++#define TT_DEV_CLB       8
++
++#define TT_DEV_CLB_PARAM(_x) ((_x << 8) | TT_DEV_CLB)
++#define TT_DEV_CLB_TYPE(_x)  ((_x >> 8) & 0xFF)
+ 
+ /* Define the Device Management control structure
+ */
+@@ -229,6 +233,12 @@
+     UINT8               lmp_features_host_may_support;  /* The flags of LMP features host may support via BR/EDR ctrlr + BTM_RE_READ_1ST_PAGE */
+     UINT8               supported_cmds[HCI_NUM_SUPP_COMMANDS_BYTES]; /* Supported Commands bit field */
+ 
++    tBTM_CLB_CB_INFO    clb_cb_info;
++    tBTM_CMPL_CB        *read_clk_cmpl;
++
++#define BTM_MAX_CLB_TIMERS 6
++    TIMER_LIST_ENT      clb_cmd_timers[BTM_MAX_CLB_TIMERS];
++
+ } tBTM_DEVCB;
+ 
+ 
+@@ -1086,6 +1096,17 @@
+ extern  void btm_reset_ctrlr_complete (void);
+ extern void btm_write_simple_paring_mode_complete (UINT8 *p);
+ extern void btm_write_le_host_supported_complete (UINT8 *p);
++extern void btm_set_clb_complete(UINT8 *p);
++extern void btm_start_sync_train_complete(UINT8 *p);
++extern void btm_sync_train_complete(UINT8 *p);
++extern void btm_set_reserved_lt_addr_complete(UINT8 *p);
++extern void btm_set_clb_data_complete(UINT8 *p);
++extern void btm_write_sync_train_params_complete(UINT8 *p);
++extern void btm_set_trg_clk_capture_complete(UINT8 *p);
++extern void btm_trg_clk_capture(UINT8 *p);
++extern void btm_slv_page_rsp_to(void);
++extern void btm_clb_channel_map_change(UINT8 *p);
++extern void btm_read_clk_cmpl(UINT8 *p);
+ 
+ #if (BLE_INCLUDED == TRUE)
+ extern void btm_read_ble_buf_size_complete (UINT8 *p, UINT16 evt_len);
+diff -Naur bluedroid_qcom_5.0/stack/btm/btm_sec.c bluedroid/stack/btm/btm_sec.c
+--- bluedroid_qcom_5.0/stack/btm/btm_sec.c	2015-08-11 14:23:02.000000000 +0800
++++ bluedroid/stack/btm/btm_sec.c	2016-02-16 16:55:14.417077057 +0800
+@@ -49,7 +49,8 @@
+ /********************************************************************************
+ **              L O C A L    F U N C T I O N     P R O T O T Y P E S            *
+ *********************************************************************************/
+-static tBTM_SEC_SERV_REC *btm_sec_find_first_serv (BOOLEAN is_originator, UINT16 psm);
++//static tBTM_SEC_SERV_REC *btm_sec_find_first_serv (BOOLEAN is_originator, UINT16 psm);
++static tBTM_SEC_SERV_REC *btm_sec_find_first_serv (CONNECTION_TYPE conn_type, UINT16 psm);
+ static tBTM_SEC_SERV_REC *btm_sec_find_next_serv (tBTM_SEC_SERV_REC *p_cur);
+ static tBTM_SEC_SERV_REC *btm_sec_find_mx_serv (UINT8 is_originator, UINT16 psm,
+                                                 UINT32 mx_proto_id,
+@@ -2953,6 +2954,8 @@
+         btsnd_hcic_set_event_mask(LOCAL_BR_EDR_CONTROLLER_ID,
+                                   (UINT8 *)HCI_LISBON_EVENT_MASK_EXT);
+ #endif
++        //XXX
++        btsnd_hcic_set_event_mask_page_2(LOCAL_BR_EDR_CONTROLLER_ID, (UINT8 *)HCI_PAGE_2_EVENT_MASK);
+         /* set the default IO capabilities */
+         btm_cb.devcb.loc_io_caps = BTM_LOCAL_IO_CAPS;
+         /* add mx service to use no security */
+diff -Naur bluedroid_qcom_5.0/stack/btu/btu_hcif.c bluedroid/stack/btu/btu_hcif.c
+--- bluedroid_qcom_5.0/stack/btu/btu_hcif.c	2015-08-11 14:23:02.000000000 +0800
++++ bluedroid/stack/btu/btu_hcif.c	2016-02-16 16:55:14.429077057 +0800
+@@ -143,6 +143,11 @@
+ static void btu_ble_rc_param_req_evt(UINT8 *p);
+ #endif
+     #endif
++
++static void btu_hcif_sync_train_complete_evt (UINT8 *p, UINT16 evt_len);
++static void btu_hcif_trig_clk_capture_evt (UINT8 *p, UINT16 evt_len);
++static void btu_hcif_slv_page_resp_to_evt (UINT8 *p, UINT16 evt_len);
++
+ /*******************************************************************************
+ **
+ ** Function         btu_hcif_store_cmd
+@@ -430,6 +435,18 @@
+             }
+             break;
+ #endif /* BLE_INCLUDED */
++        case HCI_SYNC_TRAIN_COMP_EVT:
++            btu_hcif_sync_train_complete_evt(p, hci_evt_len);
++            break;
++        case HCI_TRIG_CLK_CAPTURE_EVT:
++            btu_hcif_trig_clk_capture_evt(p, hci_evt_len);
++            break;
++        case HCI_SLAVE_PAGE_RESP_TIMEOUT_EVT:
++            btu_hcif_slv_page_resp_to_evt(p, hci_evt_len);
++            break;
++        case HCI_CLB_CHANNEL_CHANGE_EVT:
++            btm_clb_channel_map_change(p);
++            break;
+         case HCI_VENDOR_SPECIFIC_EVT:
+                 btm_vendor_specific_evt (p, hci_evt_len);
+             break;
+@@ -1158,6 +1175,24 @@
+             btm_ble_test_command_complete(p);
+             break;
+ #endif /* (BLE_INCLUDED == TRUE) */
++        case HCI_SET_CLB:
++            btm_set_clb_complete(p);
++            break;
++        case HCI_SET_RESERVED_LT_ADDR:
++        case HCI_DELETE_RESERVED_LT_ADDR:
++        //BT_TRACE_1 (TRACE_LAYER_HCI, TRACE_TYPE_DEBUG,
++         //           "LT addr command complete %d", opcode);
++            btm_set_reserved_lt_addr_complete(p);
++            break;
++        case HCI_WRITE_CLB_DATA:
++            btm_set_clb_data_complete(p);
++            break;
++        case HCI_WRITE_SYNC_TRAIN_PARAM:
++            btm_write_sync_train_params_complete(p);
++            break;
++        case HCI_SET_TRIG_CLK_CAPTURE:
++            btm_set_trg_clk_capture_complete(p);
++            break;
+ 
+         default:
+             if ((opcode & HCI_GRP_VENDOR_SPECIFIC) == HCI_GRP_VENDOR_SPECIFIC)
+@@ -1418,6 +1453,10 @@
+                 break;
+ #endif
+ */
++                    case HCI_START_SYNC_TRAIN:
++                        if (p_cmd != NULL)
++                            btm_start_sync_train_complete(p_cmd);
++                        break;
+                     default:
+                         if ((opcode & HCI_GRP_VENDOR_SPECIFIC) == HCI_GRP_VENDOR_SPECIFIC)
+                             btm_vsc_complete (&status, opcode, 1, (tBTM_CMPL_CB *)p_vsc_status_cback);
+@@ -1429,6 +1468,11 @@
+             {
+                 if ((opcode & HCI_GRP_VENDOR_SPECIFIC) == HCI_GRP_VENDOR_SPECIFIC)
+                     btm_vsc_complete (&status, opcode, 1, (tBTM_CMPL_CB *)p_vsc_status_cback);
++                else if(opcode == HCI_START_SYNC_TRAIN)
++                {
++                    if(p_cmd != NULL)
++                        btm_start_sync_train_complete(p_cmd);
++                }
+             }
+ #if BTM_PWR_MGR_INCLUDED == TRUE
+     }
+@@ -2328,3 +2372,17 @@
+ 
+ #endif /* BLE_INCLUDED */
+ 
++static void btu_hcif_sync_train_complete_evt (UINT8 *p, UINT16 evt_len)
++{
++    btm_sync_train_complete(p);
++}
++
++static void btu_hcif_trig_clk_capture_evt (UINT8 *p, UINT16 evt_len)
++{
++    btm_trg_clk_capture(p);
++}
++
++static void btu_hcif_slv_page_resp_to_evt (UINT8 *p, UINT16 evt_len)
++{
++    btm_slv_page_rsp_to();
++}
+diff -Naur bluedroid_qcom_5.0/stack/hcic/hcicmds.c bluedroid/stack/hcic/hcicmds.c
+--- bluedroid_qcom_5.0/stack/hcic/hcicmds.c	2015-08-11 14:23:02.000000000 +0800
++++ bluedroid/stack/hcic/hcicmds.c	2016-02-16 16:55:14.349077056 +0800
+@@ -3363,3 +3363,209 @@
+     return (TRUE);
+ }
+ 
++static void btu_hcif_sync_train_complete_evt (UINT8 *p, UINT16 evt_len)
++{
++    btm_sync_train_complete(p);
++}
++
++static void btu_hcif_trig_clk_capture_evt (UINT8 *p, UINT16 evt_len)
++{
++    btm_trg_clk_capture(p);
++}
++
++static void btu_hcif_slv_page_resp_to_evt (UINT8 *p, UINT16 evt_len)
++{
++    btm_slv_page_rsp_to();
++}
++
++
++BOOLEAN btsnd_hcic_set_clb(UINT8 enable, UINT8 lt_addr, UINT8 lpo_allowed, UINT16 packet_type, UINT16 interval_min, UINT16 interval_max, UINT16 supervision_timeout)
++{
++    BT_HDR *p;
++    UINT8 *pp;
++
++    if((p = HCI_GET_CMD_BUF(HCIC_PARAM_SIZE_SET_CLB)) == NULL)
++        return (FALSE);
++
++    pp        = (UINT8 *)(p + 1);
++    p->len    = HCIC_PREAMBLE_SIZE + HCIC_PARAM_SIZE_SET_CLB;
++    p->offset = 0;
++
++    UINT16_TO_STREAM(pp, HCI_SET_CLB);
++    UINT8_TO_STREAM (pp, HCIC_PARAM_SIZE_SET_CLB);
++    UINT8_TO_STREAM (pp, enable);
++    UINT8_TO_STREAM (pp, lt_addr);
++    UINT8_TO_STREAM (pp, lpo_allowed);
++    UINT16_TO_STREAM(pp, packet_type);
++    UINT16_TO_STREAM(pp, interval_min);
++    UINT16_TO_STREAM(pp, interval_max);
++    UINT16_TO_STREAM(pp, supervision_timeout);
++
++    btu_hcif_send_cmd(LOCAL_BR_EDR_CONTROLLER_ID, p);
++
++    return(TRUE);
++}
++/* Start Synchronization Train */
++HCI_API extern BOOLEAN btsnd_hcic_start_sync_train(void)
++{
++    BT_HDR *p;
++    UINT8 *pp;
++
++    if((p = HCI_GET_CMD_BUF(HCIC_PARAM_SIZE_START_SYNC_TRAIN)) == NULL)
++        return (FALSE);
++
++    pp        = (UINT8 *)(p + 1);
++    p->len    = HCIC_PREAMBLE_SIZE + HCIC_PARAM_SIZE_START_SYNC_TRAIN;
++    p->offset = 0;
++
++    UINT16_TO_STREAM(pp, HCI_START_SYNC_TRAIN);
++    UINT8_TO_STREAM (pp, HCIC_PARAM_SIZE_START_SYNC_TRAIN);
++
++    btu_hcif_send_cmd(LOCAL_BR_EDR_CONTROLLER_ID, p);
++
++    return(TRUE);
++}
++
++/* Set Reserved LT_ADDR */
++HCI_API extern BOOLEAN btsnd_hcic_set_reserved_lt_addr(UINT8 lt_addr)
++{
++    BT_HDR *p;
++    UINT8 *pp;
++
++    if((p = HCI_GET_CMD_BUF(HCIC_PARAM_SIZE_SET_RESERVED_LT_ADDR)) == NULL)
++        return (FALSE);
++
++    pp        = (UINT8 *)(p + 1);
++    p->len    = HCIC_PREAMBLE_SIZE + HCIC_PARAM_SIZE_SET_RESERVED_LT_ADDR;
++    p->offset = 0;
++
++    UINT16_TO_STREAM(pp, HCI_SET_RESERVED_LT_ADDR);
++    UINT8_TO_STREAM (pp, HCIC_PARAM_SIZE_SET_RESERVED_LT_ADDR);
++    UINT8_TO_STREAM (pp, lt_addr);
++
++    btu_hcif_send_cmd(LOCAL_BR_EDR_CONTROLLER_ID, p);
++
++    return(TRUE);
++}
++
++/* Delete Reserved LT ADDR */
++HCI_API extern BOOLEAN btsnd_hcic_delete_reserved_lt_addr(UINT8 lt_addr)
++{
++    BT_HDR *p;
++    UINT8 *pp;
++
++    if((p = HCI_GET_CMD_BUF(HCIC_PARAM_SIZE_DELETE_RESERVED_LT_ADDR)) == NULL)
++        return (FALSE);
++
++    pp        = (UINT8 *)(p + 1);
++    p->len    = HCIC_PREAMBLE_SIZE + HCIC_PARAM_SIZE_DELETE_RESERVED_LT_ADDR;
++    p->offset = 0;
++
++    UINT16_TO_STREAM(pp, HCI_DELETE_RESERVED_LT_ADDR);
++    UINT8_TO_STREAM (pp, HCIC_PARAM_SIZE_DELETE_RESERVED_LT_ADDR);
++    UINT8_TO_STREAM (pp, lt_addr);
++
++    btu_hcif_send_cmd(LOCAL_BR_EDR_CONTROLLER_ID, p);
++
++    return(TRUE);
++}
++
++/* Set Connectionless Slave Broadcast Data */
++HCI_API extern BOOLEAN btsnd_hcic_set_clb_data(UINT8 lt_addr, UINT8 fragment, UINT8 data_len, UINT8 *data)
++{
++    BT_HDR *p;
++    UINT8 *pp;
++
++    //BT_TRACE_1 (TRACE_LAYER_HCI, TRACE_TYPE_WARNING, "btsnd set cld data: %d", data_len);
++    if((p = HCI_GET_CMD_BUF(HCIC_PARAM_SIZE_SET_CLB_DATA)) == NULL)
++        return (FALSE);
++
++    pp        = (UINT8 *)(p + 1);
++    p->len    = HCIC_PREAMBLE_SIZE + 3 + data_len;
++    p->offset = 0;
++    //BT_TRACE_1 (TRACE_LAYER_HCI, TRACE_TYPE_WARNING, "cmd len (p): %d", p->len);
++
++    UINT16_TO_STREAM(pp, HCI_WRITE_CLB_DATA);
++    UINT8_TO_STREAM (pp, 3 + data_len);
++    UINT8_TO_STREAM (pp, lt_addr);
++    UINT8_TO_STREAM (pp, fragment);
++    UINT8_TO_STREAM (pp, data_len);
++    ARRAY_TO_STREAM (pp, data, data_len);
++
++    //BT_TRACE_1 (TRACE_LAYER_HCI, TRACE_TYPE_WARNING, "cmd len (p): %d", p->len);
++    btu_hcif_send_cmd(LOCAL_BR_EDR_CONTROLLER_ID, p);
++
++    return(TRUE);
++}
++
++/* Read Synchronization Train Parameters. */
++HCI_API extern BOOLEAN btsnd_hcic_read_sync_train_params(void)
++{
++    BT_HDR *p;
++    UINT8 *pp;
++
++    if((p = HCI_GET_CMD_BUF(HCIC_PARAM_SIZE_READ_SYNC_TRAIN_PARAMS)) == NULL)
++        return (FALSE);
++
++    pp        = (UINT8 *)(p + 1);
++    p->len    = HCIC_PREAMBLE_SIZE + HCIC_PARAM_SIZE_READ_SYNC_TRAIN_PARAMS;
++    p->offset = 0;
++
++    UINT16_TO_STREAM(pp, HCI_READ_SYNC_TRAIN_PARAM);
++    UINT8_TO_STREAM (pp, HCIC_PARAM_SIZE_READ_SYNC_TRAIN_PARAMS);
++
++    btu_hcif_send_cmd(LOCAL_BR_EDR_CONTROLLER_ID, p);
++
++    return(TRUE);
++}
++
++/* Write Synchronization Train Parameters. */
++HCI_API extern BOOLEAN btsnd_hcic_write_sync_train_params(UINT16 interval_min, UINT16 interval_max, UINT32 timeout, UINT8 service_data)
++{
++    BT_HDR *p;
++    UINT8 *pp;
++
++    if((p = HCI_GET_CMD_BUF(HCIC_PARAM_SIZE_WRITE_SYNC_TRAIN_PARAMS)) == NULL)
++        return (FALSE);
++
++    pp        = (UINT8 *)(p + 1);
++    p->len    = HCIC_PREAMBLE_SIZE + HCIC_PARAM_SIZE_WRITE_SYNC_TRAIN_PARAMS;
++    p->offset = 0;
++
++    UINT16_TO_STREAM(pp, HCI_WRITE_SYNC_TRAIN_PARAM);
++    UINT8_TO_STREAM (pp, HCIC_PARAM_SIZE_WRITE_SYNC_TRAIN_PARAMS);
++    UINT16_TO_STREAM(pp, interval_min);
++    UINT16_TO_STREAM(pp, interval_max);
++    UINT32_TO_STREAM(pp, timeout);
++    UINT8_TO_STREAM (pp, service_data);
++
++    btu_hcif_send_cmd(LOCAL_BR_EDR_CONTROLLER_ID, p);
++
++    return(TRUE);
++}
++
++/* Start Triggered Clock Capture */
++HCI_API extern BOOLEAN btsnd_hcic_set_trig_clk_capture(UINT16 handle, UINT8 enable, UINT8 which_clock, UINT8 lpo_allowed, UINT8 num_clock_cap_to_filter)
++{
++    BT_HDR *p;
++    UINT8 *pp;
++
++    if((p = HCI_GET_CMD_BUF(HCIC_PARAM_SIZE_SET_TRIG_CLK_CAPTURE)) == NULL)
++        return (FALSE);
++
++    pp        = (UINT8 *)(p + 1);
++    p->len    = HCIC_PREAMBLE_SIZE + HCIC_PARAM_SIZE_SET_TRIG_CLK_CAPTURE;
++    p->offset = 0;
++
++    UINT16_TO_STREAM(pp, HCI_SET_TRIG_CLK_CAPTURE);
++    UINT8_TO_STREAM (pp, HCIC_PARAM_SIZE_SET_TRIG_CLK_CAPTURE);
++    UINT16_TO_STREAM(pp, handle);
++    UINT8_TO_STREAM (pp, enable);
++    UINT8_TO_STREAM (pp, which_clock);
++    UINT8_TO_STREAM (pp, lpo_allowed);
++    UINT8_TO_STREAM (pp, num_clock_cap_to_filter);
++
++    btu_hcif_send_cmd(LOCAL_BR_EDR_CONTROLLER_ID, p);
++
++    return(TRUE);
++}
+diff -Naur bluedroid_qcom_5.0/stack/include/btm_api.h bluedroid/stack/include/btm_api.h
+--- bluedroid_qcom_5.0/stack/include/btm_api.h	2015-08-11 14:23:02.000000000 +0800
++++ bluedroid/stack/include/btm_api.h	2016-02-16 16:55:14.373077056 +0800
+@@ -111,6 +111,72 @@
+ } tBTM_VSC_CMPL;
+ 
+ #define  BTM_VSC_CMPL_DATA_SIZE  (BTM_MAX_VENDOR_SPECIFIC_LEN + sizeof(tBTM_VSC_CMPL))
++
++
++/* Structure returned when a Set CLB command completes. */
++typedef struct
++{
++   UINT8 status;
++   UINT8 lt_addr;
++   UINT16 interval;
++} tBTM_SET_CLB_CMPL;
++
++/* Structure returned whan a Set Reserved LT_ADDR command completes. */
++typedef struct
++{
++   UINT8 status;
++   UINT8 lt_addr;
++} tBTM_SET_RESERVED_LT_ADDR_CMPL;
++
++/* Structure returned when a Set CLB Data command completes. */
++typedef struct
++{
++   UINT8 status;
++   UINT8 lt_addr;
++} tBTM_SET_CLB_DATA_CMPL;
++
++/* Structure returned when a Write Sync Train Parameters command completes. */
++typedef struct
++{
++   UINT8 status;
++   UINT16 interval;
++} tBTM_WRITE_SYNC_TRAIN_PARAM_CMPL;
++
++/* Structure returned when a Triggered Clock Capture event occurs. */
++typedef struct
++{
++   UINT16 handle;
++   UINT8  which_clock;
++   UINT32 clock;
++   UINT16 offset;
++} tBTM_TRG_CLK_CAP;
++
++/* Defines the type of CLB command complete events that could occur */
++#define BTM_SET_CLB_CMPL                0
++#define BTM_START_SYNC_TRAIN_CMPL       1
++#define BTM_SET_RESERVED_LT_ADDR_CMPL   2
++#define BTM_SET_CLB_DATA_CMPL           3
++#define BTM_WRITE_SYNC_TRAIN_PARAM_CMPL 4
++#define BTM_SET_TRG_CLK_CAP_CMPL        5
++
++/* Union to hold the data returned in CLB command complete events. */
++typedef union
++{
++   UINT8                            status; /* START_SYNC TRAIN, SET_TRG_CLK_CAP */
++   tBTM_SET_CLB_CMPL                set_clb;
++   tBTM_SET_RESERVED_LT_ADDR_CMPL   set_reserved;
++   tBTM_SET_CLB_DATA_CMPL           set_clb_data;
++   tBTM_WRITE_SYNC_TRAIN_PARAM_CMPL write_param;
++} tBTM_CLB_CMPL_DATA;
++
++/* Structure which is returned in the tBTM_CMPL_CB when a CLB command completes. */
++typedef struct
++{
++    UINT8              command_type;
++    BOOLEAN            timeout;
++    tBTM_CLB_CMPL_DATA data;
++} tBTM_CLB_CMD_CMPL;
++
+ /**************************************************
+ **  Device Control and General Callback Functions
+ ***************************************************/
+@@ -155,6 +221,30 @@
+ */
+ typedef UINT8 (tBTM_FILTER_CB) (BD_ADDR bd_addr, DEV_CLASS dc);
+ 
++/* Callback for apps to receive a Triggered Clock Capture event. (Set when enabling
++** clock capture).
++*/
++typedef void (tBTM_TRG_CLK_CAP_CB) (tBTM_TRG_CLK_CAP *p);
++
++/* Callback for notifying when the Synchronization Train has completed. */
++typedef void (tBTM_SYNC_TRAIN_CMPL_CB) (UINT8 status);
++
++/* Callback for Slave Page Response Timeout events. */
++typedef void (tBTM_SLV_PAGE_RSP_TO_CB) (void);
++
++/* Calback for when the CLB channel map changes */
++typedef void (tBTM_CLB_CHANNEL_CHANGE_CB) (void);
++
++/* Structure which holds the callbacks registered for CLB events. */
++typedef struct
++{
++   tBTM_CMPL_CB            *p_cmd_cmpl_cb;
++   tBTM_TRG_CLK_CAP_CB     *p_trg_clk_cap_cb;
++   tBTM_SYNC_TRAIN_CMPL_CB *p_sync_train_cmpl_cb;
++   tBTM_SLV_PAGE_RSP_TO_CB *p_slv_page_rsp_to_cb;
++   tBTM_CLB_CHANNEL_CHANGE_CB *p_clb_channel_change_cb;
++} tBTM_CLB_CB_INFO;
++
+ /*****************************************************************************
+ **  DEVICE DISCOVERY - Inquiry, Remote Name, Discovery, Class of Device
+ *****************************************************************************/
+@@ -507,6 +597,7 @@
+ #define BTM_EIR_SHORTENED_LOCAL_NAME_TYPE   HCI_EIR_SHORTENED_LOCAL_NAME_TYPE   /* 0x08 */
+ #define BTM_EIR_COMPLETE_LOCAL_NAME_TYPE    HCI_EIR_COMPLETE_LOCAL_NAME_TYPE    /* 0x09 */
+ #define BTM_EIR_TX_POWER_LEVEL_TYPE         HCI_EIR_TX_POWER_LEVEL_TYPE         /* 0x0A */
++#define BTM_EIR_3D_INFO_TYPE                HCI_EIR_3D_INFO_TYPE                /* 0x3D */
+ #define BTM_EIR_MANUFACTURER_SPECIFIC_TYPE  HCI_EIR_MANUFACTURER_SPECIFIC_TYPE  /* 0xFF */
+ 
+ /* the following EIR tags are defined to OOB, not regular EIR data */
+@@ -1236,9 +1327,10 @@
+ #define BTM_SEC_SERVICE_HDP_SNK         48
+ #define BTM_SEC_SERVICE_HDP_SRC         49
+ #define BTM_SEC_SERVICE_ATT             50
++#define BTM_SEC_SERVICE_3D_SYNC         51
+ 
+ /* Update these as services are added */
+-#define BTM_SEC_SERVICE_FIRST_EMPTY     51
++#define BTM_SEC_SERVICE_FIRST_EMPTY     52
+ 
+ #ifndef BTM_SEC_MAX_SERVICES
+ #define BTM_SEC_MAX_SERVICES            65
+@@ -2342,6 +2434,124 @@
+     BTM_API extern tBTM_STATUS BTM_EnableTestMode(void);
+ 
+ 
++/*******************************************************************************
++**
++** Function         BTM_RegisterCLB
++**
++** Description      Register CLB callbacks.
++**
++** Returns          BTM_SUCCESS if successful, otherwise an error
++**
++**
++*******************************************************************************/
++    BTM_API extern tBTM_STATUS BTM_RegisterCLB(tBTM_CLB_CB_INFO *p_clb_cb_info);
++
++/*******************************************************************************
++**
++** Function         BTM_DeregisterCLB
++**
++** Description      De-Register CLB callbacks.
++**
++** Returns          BTM_SUCCESS if successful, otherwise an error
++**
++**
++*******************************************************************************/
++    BTM_API extern tBTM_STATUS BTM_DeregisterCLB(void);
++
++/*******************************************************************************
++**
++** Function         BTM_SetCLB
++**
++** Description      Enable/Disable Connectionless Slave Broadcasts
++**
++** Returns          BTM_SUCCESS if successful, otherwise an error
++**
++**
++*******************************************************************************/
++    BTM_API extern tBTM_STATUS BTM_SetCLB(UINT8 enable, UINT8 lt_addr, UINT8 lpo_allowed, 
++                                         UINT16 packet_type, UINT16 interval_min, 
++                                         UINT16 interval_max, UINT16 supervision_timeout); 
++
++/*******************************************************************************
++**
++** Function         BTM_StartSyncTrain
++**
++** Description      Start the Synchronization Train
++**
++** Returns          BTM_SUCCESS if successful, otherwise an error
++**
++**
++*******************************************************************************/
++    BTM_API extern tBTM_STATUS BTM_StartSyncTrain(void);
++
++/*******************************************************************************
++**
++** Function         BTM_SetReservedLTADDR
++**
++** Description      Set a reserved LT_ADDR
++**
++** Returns          BTM_SUCCESS if successful, otherwise an error
++**
++**
++*******************************************************************************/
++    BTM_API extern tBTM_STATUS BTM_SetReservedLTADDR(UINT8 lt_addr);
++
++/*******************************************************************************
++**
++** Function         BTM_DeleteReservedLTADDR
++**
++** Description      Delete a reserved LT_ADDR
++**
++** Returns          BTM_SUCCESS if successful, otherwise an error
++**
++**
++*******************************************************************************/
++    BTM_API extern tBTM_STATUS BTM_DeleteReservedLTADDR(UINT8 lt_addr);
++
++/*******************************************************************************
++**
++** Function         BTM_SetCLBData
++**
++** Description      Set the Connectionless Slave Broadcast data
++**
++** Returns          BTM_SUCCESS if successful, otherwise an error
++**
++**
++*******************************************************************************/
++    BTM_API extern tBTM_STATUS BTM_SetCLBData(UINT8 lt_addr, UINT8 fragment, UINT8 data_len, UINT8 *data);
++
++/*******************************************************************************
++**
++** Function         BTM_WriteSyncTrainParams
++**
++** Description      Write the Synchronization Train Parameters
++**
++** Returns          BTM_SUCCESS if successful, otherwise an error
++**
++**
++*******************************************************************************/
++    BTM_API extern tBTM_STATUS BTM_WriteSyncTrainParams(UINT16 interval_min, UINT16 interval_max, 
++                                                       UINT32 timeout, UINT8 service_data);
++
++/*******************************************************************************
++**
++** Function         BTM_SetTrigClkCapture
++**
++** Description      Start/Stop Triggered Clock Capture
++**
++** Returns          BTM_SUCCESS if successful, otherwise an error
++**                  If ENABLED, capture events will be sent to the
++**                  p_trg_clk_cap_cb.
++**
++**
++*******************************************************************************/
++    BTM_API extern tBTM_STATUS BTM_SetTrigClkCapture(UINT16 handle, UINT8 enable,
++                                                      UINT8 which_clock, UINT8 lpo_allowed,
++                                                      UINT8 num_clock_cap_to_filter);
++
++
++    BTM_API extern tBTM_STATUS BTM_ReadClock(tBTM_CMPL_CB *p_cb);
++
+ /*****************************************************************************
+ **  DEVICE DISCOVERY FUNCTIONS - Inquiry, Remote Name, Discovery, Class of Device
+ *****************************************************************************/
+diff -Naur bluedroid_qcom_5.0/stack/include/bt_types.h bluedroid/stack/include/bt_types.h
+--- bluedroid_qcom_5.0/stack/include/bt_types.h	2015-08-11 14:23:02.000000000 +0800
++++ bluedroid/stack/include/bt_types.h	2016-02-16 16:55:14.373077056 +0800
+@@ -449,6 +449,7 @@
+ #define BT_EIR_OOB_COD_TYPE                 0x0D
+ #define BT_EIR_OOB_SSP_HASH_C_TYPE          0x0E
+ #define BT_EIR_OOB_SSP_RAND_R_TYPE          0x0F
++#define BT_EIR_3D_INFO_TYPE                 0x3D
+ #define BT_EIR_MANUFACTURER_SPECIFIC_TYPE   0xFF
+ 
+ #define BT_OOB_COD_SIZE            3
+diff -Naur bluedroid_qcom_5.0/stack/include/hcidefs.h bluedroid/stack/include/hcidefs.h
+--- bluedroid_qcom_5.0/stack/include/hcidefs.h	2015-08-11 14:23:02.000000000 +0800
++++ bluedroid/stack/include/hcidefs.h	2016-02-16 16:55:14.373077056 +0800
+@@ -269,6 +269,7 @@
+ #define HCI_READ_LOCAL_AMP_INFO         (0x0009 | HCI_GRP_STATUS_PARAMS)
+ #define HCI_READ_LOCAL_AMP_ASSOC        (0x000A | HCI_GRP_STATUS_PARAMS)
+ #define HCI_WRITE_REMOTE_AMP_ASSOC      (0x000B | HCI_GRP_STATUS_PARAMS)
++#define HCI_SET_TRIG_CLK_CAPTURE        (0x000D | HCI_GRP_STATUS_PARAMS)
+ 
+ #define HCI_STATUS_PARAMS_CMDS_FIRST    HCI_READ_FAILED_CONTACT_COUNT
+ #define HCI_STATUS_PARAMS_CMDS_LAST     HCI_WRITE_REMOTE_AMP_ASSOC
+@@ -663,7 +664,8 @@
+ #define HCI_NUM_COMPL_DATA_BLOCKS_EVT       0x48
+ #define HCI_SHORT_RANGE_MODE_COMPLETE_EVT   0x4C
+ #define HCI_AMP_STATUS_CHANGE_EVT           0x4D
+-#define HCI_SET_TRIGGERED_CLOCK_CAPTURE_EVT 0x4E
++//#define HCI_SET_TRIGGERED_CLOCK_CAPTURE_EVT 0x4E
++#define HCI_TRIG_CLK_CAPTURE_EVT            0x4E
+ 
+ /* ULP HCI Event */
+ #define HCI_BLE_EVENT                   0x03E
+@@ -675,6 +677,16 @@
+ #define HCI_BLE_LTK_REQ_EVT                 0x05
+ #define HCI_BLE_RC_PARAM_REQ_EVT            0x06
+ 
++/* ConnectionLess Broadcast events */
++#define HCI_SYNC_TRAIN_COMP_EVT             0x4F
++#define HCI_SYNC_TRAIN_RECEIVED_EVT         0x50
++#define HCI_CLB_RX_DATA_EVT                 0x51
++#define HCI_CLB_RX_TIMEOUT_EVT              0x52
++#define HCI_TRUNCATED_PAGE_COMP_EVT         0x53
++#define HCI_SLAVE_PAGE_RESP_TIMEOUT_EVT     0x54
++#define HCI_CLB_CHANNEL_CHANGE_EVT          0x55
++#define HCI_INQUIRY_RESPONSE_NOTIF          0x56 
++
+ /* Definitions for LE Channel Map */
+ #define HCI_BLE_CHNL_MAP_SIZE               5
+ 
+@@ -1064,6 +1076,7 @@
+ #define HCI_EIR_OOB_COD_TYPE                 BT_EIR_OOB_COD_TYPE
+ #define HCI_EIR_OOB_SSP_HASH_C_TYPE          BT_EIR_OOB_SSP_HASH_C_TYPE
+ #define HCI_EIR_OOB_SSP_RAND_R_TYPE          BT_EIR_OOB_SSP_RAND_R_TYPE
++#define HCI_EIR_3D_INFO_TYPE                 BT_EIR_3D_INFO_TYPE
+ 
+ /* Definitions for Write Simple Pairing Mode */
+ #define HCI_SP_MODE_UNDEFINED           0x00
+@@ -1279,12 +1292,19 @@
+ #define HCI_CLB_DISABLE                 0x00
+ #define HCI_CLB_ENABLE                  0x01
+ 
++#define HCI_CLB_LPO_DISALLOWED          0x00
++#define HCI_CLB_LPO_ALLOWED             0x01
++
+ /* ConnectionLess Broadcast Data fragment */
+ #define HCI_CLB_FRAGMENT_CONT           0x00
+ #define HCI_CLB_FRAGMENT_START          0x01
+ #define HCI_CLB_FRAGMENT_END            0x02
+ #define HCI_CLB_FRAGMENT_SINGLE         0x03
+ 
++/* Triggered Clock Capture */
++#define HCI_WHICH_CLOCK_LOCAL           0x00
++#define HCI_WHICH_CLOCK_PICO            0x01
++
+ /* AMP Controller Status codes
+ */
+ #define HCI_AMP_CTRLR_PHYSICALLY_DOWN   0
+diff -Naur bluedroid_qcom_5.0/stack/include/hcimsgs.h bluedroid/stack/include/hcimsgs.h
+--- bluedroid_qcom_5.0/stack/include/hcimsgs.h	2015-08-11 14:23:02.000000000 +0800
++++ bluedroid/stack/include/hcimsgs.h	2016-02-16 16:55:14.373077056 +0800
+@@ -929,6 +929,69 @@
+                                                 void *p_cmd_cplt_cback);
+ 
+ 
++/* Set Connectionless Slave Broadcast */
++HCI_API extern BOOLEAN btsnd_hcic_set_clb(UINT8 enable, UINT8 lt_addr, UINT8 lpo_allowed, 
++                                         UINT16 packet_type, UINT16 interval_mim, 
++                                         UINT16 interval_max, UINT16 supervision_timeout); 
++
++#define HCIC_PARAM_SIZE_SET_CLB 11
++
++#define HCI_SET_CLB_DISABLE 0
++#define HCI_SET_CLB_ENABLE  1
++
++#define HCI_SET_CLB_LPO_DISALLOWED 0
++#define HCI_SET_CLB_LPO_ALLOWED    1
++
++/* Start Synchronization Train */
++HCI_API extern BOOLEAN btsnd_hcic_start_sync_train(void);
++
++#define HCIC_PARAM_SIZE_START_SYNC_TRAIN 0
++
++/* Set Reserved LT_ADDR */
++HCI_API extern BOOLEAN btsnd_hcic_set_reserved_lt_addr(UINT8 lt_addr);
++
++#define HCIC_PARAM_SIZE_SET_RESERVED_LT_ADDR 1
++
++/* Delete Reserved LT ADDR */
++HCI_API extern BOOLEAN btsnd_hcic_delete_reserved_lt_addr(UINT8 lt_addr);
++
++#define HCIC_PARAM_SIZE_DELETE_RESERVED_LT_ADDR 1
++
++/* Set Connectionless Slave Broadcast Data */
++HCI_API extern BOOLEAN btsnd_hcic_set_clb_data(UINT8 lt_addr, UINT8 fragment, UINT8 data_len, UINT8 *data);
++
++//No max data length is defined, so in theory we could have up to 256 bytes of data
++#define HCIC_PARAM_SIZE_SET_CLB_DATA 259
++
++#define HCI_SET_CLB_DATA_FRAGMENT_CONTINUE 0
++#define HCI_SET_CLB_DATA_FRAGMENT_STARTING 1
++#define HCI_SET_CLB_DATA_FRAGMENT_ENDING   2
++#define HCI_SET_CLB_DATA_NO_FRAGMENTATION  3
++
++/* Read Synchronization Train Parameters. */
++HCI_API extern BOOLEAN btsnd_hcic_read_sync_train_params(void);
++
++#define HCIC_PARAM_SIZE_READ_SYNC_TRAIN_PARAMS 0
++
++/* Write Synchronization Train Parameters. */
++HCI_API extern BOOLEAN btsnd_hcic_write_sync_train_params(UINT16 interval_mim, UINT16 interval_max, UINT32 timeout, UINT8 service_data);
++
++#define HCIC_PARAM_SIZE_WRITE_SYNC_TRAIN_PARAMS 9
++
++/* Start Triggered Clock Capture */
++HCI_API extern BOOLEAN btsnd_hcic_set_trig_clk_capture(UINT16 handle, UINT8 enable, UINT8 which_clock, UINT8 lpo_allowed, UINT8 num_clock_cap_to_filter);
++
++#define HCIC_PARAM_SIZE_SET_TRIG_CLK_CAPTURE 6
++
++#define HCI_SET_TRG_CLK_CAPTURE_DISABLE 0
++#define HCI_SET_TRG_CLK_CAPTURE_ENABLE  1
++
++#define HCI_SET_TRG_CLK_CAPTURE_CLOCK_LOCAL 0
++#define HCI_SET_TRG_CLK_CAPTURE_CLOCK_PICO  1
++
++#define HCI_SET_TRG_CLK_CAPTURE_LPO_DISALLOWED 0
++#define HCI_SET_TRG_CLK_CAPTURE_LPO_ALLOWED    1
++
+ /*********************************************************************************
+ **                                                                              **
+ **                          H C I    E V E N T S                                **
+diff -Naur bluedroid_qcom_5.0/stack/include/sdpdefs.h bluedroid/stack/include/sdpdefs.h
+--- bluedroid_qcom_5.0/stack/include/sdpdefs.h	2015-08-11 14:23:02.000000000 +0800
++++ bluedroid/stack/include/sdpdefs.h	2016-02-16 16:55:14.373077056 +0800
+@@ -253,6 +253,8 @@
+ #define UUID_SERVCLASS_MAP_PROFILE              0X1134  /* MAP profile UUID */
+ #define UUID_SERVCLASS_MESSAGE_ACCESS           0X1132  /* Message Access Service UUID */
+ #define UUID_SERVCLASS_MESSAGE_NOTIFICATION     0X1133  /* Message Notification Service UUID */
++#define UUID_SERVCLASS_3D_DISPLAY               0X1137
++#define UUID_SERVCLASS_3D_SYNC                  0X1139
+ 
+ #define UUID_SERVCLASS_GAP_SERVER               0x1800
+ #define UUID_SERVCLASS_GATT_SERVER              0x1801

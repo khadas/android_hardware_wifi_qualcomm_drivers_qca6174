@@ -1,0 +1,63 @@
+From acf1355407faf53fd13931fc1834fed65092c543 Mon Sep 17 00:00:00 2001
+From: Kai Liu <kaliu@qti.qualcomm.com>
+Date: Mon, 15 Jun 2015 13:45:32 +0800
+Subject: [PATCH 1/7] cfg80211: Add AP stopped interface
+
+AP stopped interface can be used to indicate that the AP mode has
+stopped functioning, WLAN driver may have encountered errors that has
+forced the driver to stop the AP mode.
+
+When the driver is in P2P-Go mode, and when it goes thru automatic
+recovery from firmware crashes, it uses this interface to notify the
+userspace that the group has been deleted.
+
+CRs-Fixed: 453060
+Change-Id: Ifcd8d4f0c0b26f56a56fb8560aa474297b7521d4
+Signed-off-by: Sameer Thalappil <sameert@codeaurora.org>
+---
+ include/net/cfg80211.h |    7 +++++++
+ net/wireless/nl80211.c |   10 ++++++++++
+ 2 files changed, 17 insertions(+)
+
+diff --git a/include/net/cfg80211.h b/include/net/cfg80211.h
+index a2ddcf2..21a1014 100644
+--- a/include/net/cfg80211.h
++++ b/include/net/cfg80211.h
+@@ -4872,6 +4872,13 @@ void cfg80211_shutdown_all_interfaces(struct wiphy *wiphy);
+ /* ethtool helper */
+ void cfg80211_get_drvinfo(struct net_device *dev, struct ethtool_drvinfo *info);
+ 
++/**
++ * cfg80211_ap_stopped - notify userspace that AP mode stopped
++ * @netdev: network device
++ * @gfp: context flags
++ */
++void cfg80211_ap_stopped(struct net_device *netdev, gfp_t gfp);
++
+ /* Logging, debugging and troubleshooting/diagnostic helpers. */
+ 
+ /* wiphy_printk helpers, similar to dev_printk */
+diff --git a/net/wireless/nl80211.c b/net/wireless/nl80211.c
+index 5839c85..e58a359 100644
+--- a/net/wireless/nl80211.c
++++ b/net/wireless/nl80211.c
+@@ -12103,6 +12103,16 @@ void nl80211_send_ap_stopped(struct wireless_dev *wdev)
+ 	nlmsg_free(msg);
+ }
+ 
++void cfg80211_ap_stopped(struct net_device *netdev, gfp_t gfp)
++{
++	struct wireless_dev *wdev = netdev->ieee80211_ptr;
++	struct cfg80211_registered_device *rdev = wiphy_to_rdev(wdev->wiphy);
++
++	nl80211_send_mlme_event(rdev, netdev, NULL, 0,
++				NL80211_CMD_STOP_AP, gfp, -1);
++}
++EXPORT_SYMBOL(cfg80211_ap_stopped);
++
+ /* initialisation/exit functions */
+ 
+ int nl80211_init(void)
+-- 
+1.7.9.5
+

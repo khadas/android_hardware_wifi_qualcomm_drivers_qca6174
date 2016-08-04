@@ -1,0 +1,104 @@
+diff -Nuar a/device/qcom/apq8084/apq8084.mk b/device/qcom/apq8084/apq8084.mk
+--- a/device/qcom/apq8084/apq8084.mk
++++ b/device/qcom/apq8084/apq8084.mk
+@@ -57,6 +57,7 @@
+     frameworks/native/data/etc/android.hardware.sensor.proximity.xml:system/etc/permissions/android.hardware.sensor.proximity.xml \
+     frameworks/native/data/etc/android.hardware.sensor.barometer.xml:system/etc/permissions/android.hardware.sensor.barometer.xml \
+     frameworks/native/data/etc/android.hardware.sensor.stepcounter.xml:system/etc/permissions/android.hardware.sensor.stepcounter.xml \
++    frameworks/native/data/etc/android.hardware.ethernet.xml:system/etc/permissions/android.hardware.ethernet.xml\
+     frameworks/native/data/etc/android.hardware.sensor.stepdetector.xml:system/etc/permissions/android.hardware.sensor.stepdetector.xml
+ 
+ #FEATURE_OPENGLES_EXTENSION_PACK support string config file
+diff -Nuar a/device/qcom/apq8084/hostapd.conf b/device/qcom/apq8084/hostapd.conf
+--- a/device/qcom/apq8084/hostapd.conf
++++ b/device/qcom/apq8084/hostapd.conf
+@@ -3,7 +3,7 @@
+ 
+ # AP netdevice name (without 'ap' postfix, i.e., wlan0 uses wlan0ap for
+ # management frames); ath0 for madwifi
+-interface=wlan0
++interface=wap0
+ 
+ # In case of madwifi and nl80211 driver interfaces, an additional configuration
+ # parameter, bridge, must be used to notify hostapd if the interface is
+diff -Nuar a/device/qcom/common/device/overlay/frameworks/base/core/res/res/values/config.xml b/device/qcom/common/device/overlay/frameworks/base/core/res/res/values/config.xml
+--- a/device/qcom/common/device/overlay/frameworks/base/core/res/res/values/config.xml
++++ b/device/qcom/common/device/overlay/frameworks/base/core/res/res/values/config.xml
+@@ -34,7 +34,7 @@
+          Wifi interfaces.  If the device doesn't want to support tethering over Wifi this
+          should be empty.  An example would be "softap.*" -->
+     <string-array translatable="false" name="config_tether_wifi_regexs">
+-        <item>"wlan0"</item>
++        <item>"wap0"</item>
+     </string-array>
+ 
+     <!-- This string array should be overridden by the device to present a list of network
+@@ -57,6 +57,8 @@
+         <item>"mobile_ims,11,0,2,60000,true"</item>
+         <item>"mobile_cbs,12,0,2,60000,true"</item>
+         <item>"bluetooth,7,7,2,-1,true"</item>
++        <item>"ethernet,9,9,0,-1,true"</item>
++        <item>"qcomsoftap,18,18,0,-1,true"</item>
+     </string-array>
+ 
+     <!-- This string array should be overridden by the device to present a list of radio
+@@ -68,6 +70,8 @@
+         <item>"1,1"</item>
+         <item>"0,1"</item>
+         <item>"7,1"</item>
++        <item>"9,1"</item>
++        <item>"18,1"</item>
+     </string-array>
+ 
+     <!-- List of regexpressions describing the interface (if any) that represent tetherable
+@@ -87,6 +91,7 @@
+         <item>4</item>
+         <item>5</item>
+         <item>7</item>
++        <item>9</item>
+     </integer-array>
+ 
+     <!-- Boolean indicating if current platform supports BLE peripheral mode -->
+diff -Nuar a/device/qcom/common/rootdir/etc/init.qcom.rc b/device/qcom/common/rootdir/etc/init.qcom.rc
+--- a/device/qcom/common/rootdir/etc/init.qcom.rc
++++ b/device/qcom/common/rootdir/etc/init.qcom.rc
+@@ -274,7 +274,6 @@
+ 
+     #Create a folder for SRS to be able to create a usercfg file
+     mkdir /data/data/media 0770 media media
+-
+ # Export GPIO56 for fusion targets to enable/disable hub
+ service usbhub_init /system/bin/usbhub_init
+    class late_start
+@@ -555,6 +554,11 @@
+     disabled
+     oneshot
+ 
++service dhcpcd_eth0 /system/bin/dhcpcd -ABKLG
++    class main
++    disabled
++    oneshot
++
+ service iprenew_wlan0 /system/bin/dhcpcd -n
+     class late_start
+     disabled
+@@ -565,6 +569,11 @@
+     disabled
+     oneshot
+ 
++service iprenew_eth0 /system/bin/dhcpcd -n
++    class main
++    disabled
++    oneshot
++
+ service ptt_socket_app /system/bin/ptt_socket_app -d
+     class main
+     user root
+diff -Nuar a/device/qcom/common/rootdir/etc/init.qcom.sh b/device/qcom/common/rootdir/etc/init.qcom.sh
+--- a/device/qcom/common/rootdir/etc/init.qcom.sh
++++ b/device/qcom/common/rootdir/etc/init.qcom.sh
+@@ -165,3 +165,4 @@
+         start_charger_monitor
+         ;;
+ esac
++echo 0 0 0 0 > /proc/sys/kernel/printk

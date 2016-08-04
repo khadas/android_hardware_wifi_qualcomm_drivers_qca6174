@@ -1,0 +1,150 @@
+From 28b00edced1f5688481ddaf11ea847b43d07ad08 Mon Sep 17 00:00:00 2001
+From: Yi Chen <yichen@qti.qualcomm.com>
+Date: Thu, 17 Dec 2015 18:42:11 +0800
+Subject: [PATCH 07/12] Add CONFIG_SS_REGULATORY. Signed-off-by: Yi Chen
+ <yichen@qti.qualcomm.com>
+
+---
+ CORE/SERVICES/WMA/regdomain.h        |   36 +++++++++++++++++++++++-
+ CORE/SERVICES/WMA/regdomain_common.h |   50 +++++++++++++++++++++++++++++++++-
+ 3 files changed, 88 insertions(+), 2 deletions(-)
+
+diff --git a/CORE/SERVICES/WMA/regdomain.h b/CORE/SERVICES/WMA/regdomain.h
+index 516a3af..d675b91 100644
+--- a/CORE/SERVICES/WMA/regdomain.h
++++ b/CORE/SERVICES/WMA/regdomain.h
+@@ -1091,7 +1091,41 @@ enum CountryCode {
+ 
+     CTRY_AUSTRALIA2           = 5000,    /* Australia for AP only */
+     CTRY_CANADA2              = 5001,    /* Canada for AP only */
+-    CTRY_BELGIUM2             = 5002     /* Belgium/Cisco implementation */
++    CTRY_BELGIUM2             = 5002,    /* Belgium/Cisco implementation */
++#ifdef SS_REGULATORY
++    CTRY_QM                   = 5003,    /* customer_1_spec */
++    CTRY_QN                   = 5004,    /* customer_1_spec */
++    CTRY_QO                   = 5005,    /* customer_1_spec */
++    CTRY_QP                   = 5006,    /* customer_1_spec */
++    CTRY_QQ                   = 5007,    /* customer_1_spec */
++    CTRY_QR                   = 5008,    /* customer_1_spec */
++    CTRY_QS                   = 5009,    /* customer_1_spec */
++    CTRY_QT                   = 5010,    /* customer_1_spec */
++    CTRY_QU                   = 5011,    /* customer_1_spec */
++    CTRY_QV                   = 5012,    /* customer_1_spec */
++    CTRY_QW                   = 5013,    /* customer_1_spec */
++    CTRY_QX                   = 5014,    /* customer_1_spec */
++    CTRY_QY                   = 5015,    /* customer_1_spec */
++    CTRY_QZ                   = 5016,    /* customer_1_spec */
++    CTRY_XA                   = 5017,    /* customer_1_spec */
++    CTRY_XB                   = 5018,    /* customer_1_spec */
++    CTRY_XC                   = 5019,  	 /* customer_1_spec */
++    CTRY_XD                   = 5020,	 /* customer_1_spec */
++    CTRY_XE                   = 5021, 	 /* customer_1_spec */
++    CTRY_XF                   = 5022, 	 /* customer_1_spec */
++    CTRY_XG                   = 5023, 	 /* customer_1_spec */
++    CTRY_XH                   = 5024, 	 /* customer_1_spec */
++    CTRY_XI                   = 5025, 	 /* customer_1_spec */
++    CTRY_XJ                   = 5026,	 /* customer_1_spec */
++    CTRY_XK                   = 5027, 	 /* customer_1_spec */
++    CTRY_XL                   = 5028, 	 /* customer_1_spec */
++    CTRY_XM                   = 5029, 	 /* customer_1_spec */
++    CTRY_XN                   = 5030, 	 /* customer_1_spec */
++    CTRY_XO                   = 5031, 	 /* customer_1_spec */
++    CTRY_XP                   = 5032, 	 /* customer_1_spec */
++    CTRY_XQ                   = 5033, 	 /* customer_1_spec */
++    CTRY_XR                   = 5034, 	 /* customer_1_spec */
++#endif /* SS_REGULATORY */
+ };
+ 
+ int32_t regdmn_get_country_alpha2(struct regulatory *reg);
+diff --git a/CORE/SERVICES/WMA/regdomain_common.h b/CORE/SERVICES/WMA/regdomain_common.h
+index 9acdc1b..74b9dfd 100644
+--- a/CORE/SERVICES/WMA/regdomain_common.h
++++ b/CORE/SERVICES/WMA/regdomain_common.h
+@@ -102,6 +102,9 @@ enum EnumRd {
+     FCC4_FCCA   = 0x12,     /* USA - Public Safety */
+     FCC5_FCCA   = 0x13,     /* US with no DFS (UNII-1 + UNII-3 Only)*/
+     FCC6_FCCA   = 0x14,     /* Canada for AP only*/
++#ifdef SS_REGULATORY
++    FCC5_WORLD  = 0x15,
++#endif /* SS_REGULATORY */
+ 
+     FCC2_FCCA   = 0x20,     /* Canada */
+     FCC2_WORLD  = 0x21,     /* Australia & HK */
+@@ -220,6 +223,9 @@ enum EnumRd {
+     MKK12_MKKA2 = 0xDD,     /* Japan UNI-1 even + UNI-1 odd + UNI-2 + mid-band + 4.9GHz + MKKA2 */
+ 
+     MKK13_MKKB  = 0xDE,     /* Japan UNI-1 even + UNI-1 odd + UNI-2 + mid-band + MKKB + All passive + no adhoc */
++#ifdef SS_REGULATORY
++    MKK5_MKKA	= 0XDF,
++#endif /* SS_REGULATORY */
+ 
+     /* Following definitions are used only by s/w to map old
+      * Japan SKUs.
+@@ -349,6 +355,9 @@ static const REG_DMN_PAIR_MAPPING ahCmnRegDomainPairs[] = {
+ 	{FCC3_ETSIC,    FCC3,		ETSIC,		NO_REQ, NO_REQ, PSCAN_DEFER, 0 },
+ 	{FCC4_FCCA,     FCC4,		FCCA,		DISALLOW_ADHOC_11A | DISALLOW_ADHOC_11A_TURB, NO_REQ, PSCAN_DEFER, 0 },
+ 	{FCC5_FCCA,     FCC5,		FCCA,		NO_REQ, NO_REQ, PSCAN_DEFER, 0 },
++#ifdef SS_REGULATORY
++	{FCC5_WORLD,    FCC5,		WORLD,		NO_REQ, NO_REQ, PSCAN_DEFER, 0 },
++#endif /* SS_REGULATORY */
+ 	{FCC6_FCCA,     FCC6,		FCCA,		NO_REQ, NO_REQ, PSCAN_DEFER, 0 },
+ 	{FCC6_WORLD,    FCC6,		WORLD,		NO_REQ, NO_REQ, PSCAN_DEFER, 0 },
+ 
+@@ -409,6 +418,9 @@ static const REG_DMN_PAIR_MAPPING ahCmnRegDomainPairs[] = {
+ 
+ 	/* MKK5 */
+ /*	{MKK5_MKKA,     MKK5,           MKKA,           DISALLOW_ADHOC_11A_TURB | NEED_NFC | LIMIT_FRAME_4MS, NEED_NFC, PSCAN_MKK3, CTRY_JAPAN56 },*/
++#ifdef SS_REGULATORY
++	{MKK5_MKKA, MKK5,       MKKA,       DISALLOW_ADHOC_11A_TURB | NEED_NFC | LIMIT_FRAME_4MS, NEED_NFC, PSCAN_MKK3, CTRY_JAPAN56 },
++#endif /* SS_REGULATORY */
+ 	{MKK5_MKKB,	MKK5,		MKKA,		DISALLOW_ADHOC_11A | DISALLOW_ADHOC_11A_TURB | NEED_NFC | LIMIT_FRAME_4MS, NEED_NFC, PSCAN_MKK3 | PSCAN_MKKA | PSCAN_MKKA_G, CTRY_JAPAN13 },
+ 	{MKK5_MKKA2,MKK5,		MKKA,		DISALLOW_ADHOC_11A_TURB | NEED_NFC | LIMIT_FRAME_4MS, NEED_NFC, PSCAN_MKK3 | PSCAN_MKKA2 | PSCAN_MKKA2_G, CTRY_JAPAN14 },
+ 	{MKK5_MKKC,	MKK5,		MKKC,		DISALLOW_ADHOC_11A_TURB | NEED_NFC | LIMIT_FRAME_4MS, NEED_NFC, PSCAN_MKK3, CTRY_JAPAN15 },
+@@ -671,7 +683,43 @@ static const COUNTRY_CODE_TO_ENUM_RD ahCmnAllCountries[] = {
+     {CTRY_VENEZUELA,   FCC1_WORLD,    "VE", "VENEZUELA",      YES,  NO, YES, YES, YES, YES, YES, YES, 7000 },
+     {CTRY_VIET_NAM,    ETSI3_WORLD,   "VN", "VIET NAM",       YES,  NO, YES, YES, YES, YES, YES, YES, 7000 },
+     {CTRY_YEMEN,       NULL1_WORLD,   "YE", "YEMEN",          YES,  NO, YES, YES, YES,  NO,  NO, NO, 7000 },
+-    {CTRY_ZIMBABWE,    NULL1_WORLD,   "ZW", "ZIMBABWE",       YES,  NO, YES, YES, YES,  NO,  NO, NO, 7000 }
++    {CTRY_ZIMBABWE,    NULL1_WORLD,   "ZW", "ZIMBABWE",       YES,  NO, YES, YES, YES,  NO,  NO, NO, 7000 },
++
++#ifdef SS_REGULATORY
++    /*11g, ATu,	GTu, G20, G40, A20, A40, A80*/
++    {CTRY_QM,	NULL1_ETSIB,	"QM", "SS A",       	  YES,  NO, YES, YES,  NO,  NO,  NO,  NO, 7000 },//NO 5G
++    {CTRY_QN,	FCC3_WORLD,		"QN", "SS B",       	  YES, YES, YES, YES, YES, YES, YES, YES, 7000 },
++    {CTRY_QO,	ETSI8_WORLD,	"QO", "SS C", 		  YES, YES, YES, YES, YES, YES, YES, YES, 7000 },
++    {CTRY_QP,	APL10_MKKC,	"QP", "SS D", 		  YES, YES, YES, YES, YES, YES, YES, YES, 7000 },
++    {CTRY_QQ,	ETSI1_WORLD,	"QQ", "SS E", 		  YES, YES, YES, YES, YES, YES, YES, YES, 7000 },
++    {CTRY_QR,	FCC1_WORLD,		"QR", "SS F", 		  YES, YES, YES, YES, YES, YES, YES, YES, 7000 },
++    {CTRY_QS,	FCC2_ETSIC,		"QS", "SS G", 		  YES, YES, YES, YES, YES, YES, YES, YES, 7000 },
++    {CTRY_QT,	ETSI3_WORLD,	"QT", "SS H", 		  YES, YES, YES, YES, YES, YES, YES, YES, 7000 },
++    {CTRY_QU,	ETSI5_WORLD,	"QU", "SS I", 		  YES, YES, YES, YES, YES, YES, YES, YES, 7000 },
++    {CTRY_QV,	APL4_WORLD,		"QV", "SS J", 		  YES, YES, YES, YES, YES, YES, YES, YES, 7000 },
++    {CTRY_QW,	APL5_WORLD,		"QW", "SS K", 		  YES, YES, YES, YES, YES, YES, YES, YES, 7000 },
++    {CTRY_QX,	FCC4_FCCA,		"QX", "SS L", 		  YES, YES, YES, YES, YES, YES, YES, YES, 7000 },
++    {CTRY_QY,	FCC6_WORLD,		"QY", "SS M", 		  YES, YES, YES, YES, YES, YES, YES, YES, 7000 },
++    {CTRY_QZ,	APL2_WORLD,		"QZ", "SS N", 		  YES, YES, YES, YES, YES, YES, YES,  NO, 7000 },//NO AC80
++    {CTRY_XA,	APL9_MKKC,		"XA", "SS O", 		  YES, YES, YES, YES, YES, YES, YES, YES, 7000 },
++    {CTRY_XB,	APL8_WORLD,		"XB", "SS P", 		  YES, YES, YES, YES, YES, YES, YES, YES, 7000 },
++    {CTRY_XC,	ETSI9_WORLD,	"XC", "SS Q", 		  YES, YES, YES, YES, YES, YES, YES, YES, 7000 },
++    {CTRY_XD,	FCC5_WORLD,		"XD", "SS R", 		  YES, YES, YES, YES, YES, YES, YES,  NO, 7000 },//NO AC80
++    {CTRY_XE,	APL6_WORLD,		"XE", "SS S", 		  YES, YES, YES, YES, YES, YES, YES, YES, 7000 },
++    {CTRY_XF,	MKK5_MKKA,		"XF", "SS T", 		  YES, YES, YES, YES, YES, YES, YES, YES, 7000 },
++    {CTRY_XG,	MKK11_FCCA,		"XG", "SS U", 		  YES, YES, YES, YES, YES, YES, YES, YES, 7000 },
++    {CTRY_XH,	APL1_WORLD,		"XH", "SS V", 		  YES, YES, YES, YES, YES, YES, YES, YES, 7000 },
++    {CTRY_XI,	APL3_WORLD,		"XI", "SS W", 		  YES, YES, YES, YES, YES, YES, YES, YES, 7000 },
++    {CTRY_XJ,	FCC6_FCCA,		"XJ", "SS X", 		   NO, YES,  NO,  NO,  NO, YES, YES,  NO, 7000 },//No 2G, NO AC80
++    {CTRY_XK,	APL7_FCCA,		"XK", "SS Y", 		  YES, YES, YES, YES, YES, YES, YES, YES, 7000 },
++    {CTRY_XL,	ETSI2_WORLD,	"XL", "SS Z", 		  YES, YES, YES, YES, YES, YES, YES, YES, 7000 },
++    {CTRY_XM,	ETSI6_WORLD,	"XM", "SS AA", 		  YES, YES, YES, YES, YES, YES, YES, YES, 7000 },
++    {CTRY_XN,	ETSI4_WORLD,	"XN", "SS AB", 		  YES, YES, YES, YES, YES, YES, YES, YES, 7000 },
++    {CTRY_XO,	WOR3_WORLD,		"XO", "SS AC", 		  YES, YES, YES, YES, YES, YES, YES, YES, 7000 },
++    {CTRY_XP,	WOR01_WORLD,	"XP", "SS AD", 		  YES, YES, YES, YES, YES, YES, YES, YES, 7000 },
++    {CTRY_XQ,	WOR02_WORLD,	"XQ", "SS AE", 		  YES, YES, YES, YES, YES, YES, YES, YES, 7000 },
++    {CTRY_XR,	WOR4_WORLD,		"XR", "SS AF", 		  YES, YES, YES, YES, YES, YES, YES,  NO, 7000 },//NO AC80
++#endif /* SS_REGULATORY */
+ };
+ 
+ 
+-- 
+1.7.9.5
+

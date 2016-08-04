@@ -1,0 +1,125 @@
+From d8c115eccd0e9f88618e331032a89133bdb50247 Mon Sep 17 00:00:00 2001
+From: zhangq <zhangq@qti.qualcomm.com>
+Date: Tue, 27 Oct 2015 17:09:36 +0800
+Subject: [PATCH 2/2] qcacld: Support qcmbcr&ftm-daemon via one bin
+
+Our host driver cannot support qcmbr and ftm library(ftm-daemon)
+via one binary. This change will make ftm library work even
+LINUX_QCMBR is enabled.
+
+Source of FTM cmd will be tracked, so the response will be only
+sent back to corresponding receiver.
+
+Change-Id: I475b4a87ebdac7f0801734fd6a97ab1bbf100d06
+CRs-fixed: 929242
+---
+ CORE/HDD/inc/wlan_hdd_ftm.h      |    2 +-
+ CORE/HDD/src/wlan_hdd_cfg80211.c |    3 +--
+ CORE/HDD/src/wlan_hdd_ftm.c      |   26 +++++++++++++++++++++-----
+ 3 files changed, 23 insertions(+), 8 deletions(-)
+
+diff --git CORE/HDD/inc/wlan_hdd_ftm.h CORE/HDD/inc/wlan_hdd_ftm.h
+index d6095a3..018bd17 100644
+--- CORE/HDD/inc/wlan_hdd_ftm.h
++++ CORE/HDD/inc/wlan_hdd_ftm.h
+@@ -59,7 +59,7 @@ int wlan_hdd_ftm_close(hdd_context_t *pHddCtx);
+ 
+ #if defined(QCA_WIFI_2_0) && defined(QCA_WIFI_FTM) \
+     && !defined(QCA_WIFI_ISOC)
+-VOS_STATUS wlan_hdd_ftm_testmode_cmd(void *data, int len);
++VOS_STATUS wlan_hdd_ftm_testmode_cmd(void *data, int len, boolean from_qcmbr);
+ int wlan_hdd_qcmbr_unified_ioctl(hdd_adapter_t *pAdapter, struct ifreq *ifr);
+ #endif
+ 
+diff --git CORE/HDD/src/wlan_hdd_cfg80211.c CORE/HDD/src/wlan_hdd_cfg80211.c
+index b811c3b..fb0f926 100644
+--- CORE/HDD/src/wlan_hdd_cfg80211.c
++++ CORE/HDD/src/wlan_hdd_cfg80211.c
+@@ -13785,8 +13785,7 @@ static int __wlan_hdd_cfg80211_testmode(struct wiphy *wiphy,
+ 
+             buf = nla_data(tb[WLAN_HDD_TM_ATTR_DATA]);
+             buf_len = nla_len(tb[WLAN_HDD_TM_ATTR_DATA]);
+-
+-            status = wlan_hdd_ftm_testmode_cmd(buf, buf_len);
++            status = wlan_hdd_ftm_testmode_cmd(buf, buf_len, FALSE);
+ 
+             if (status != VOS_STATUS_SUCCESS)
+                 err = -EBUSY;
+diff --git CORE/HDD/src/wlan_hdd_ftm.c CORE/HDD/src/wlan_hdd_ftm.c
+index 0686aed..783453a 100644
+--- CORE/HDD/src/wlan_hdd_ftm.c
++++ CORE/HDD/src/wlan_hdd_ftm.c
+@@ -108,8 +108,12 @@ typedef struct qcmbr_queue_s {
+     unsigned char utf_buf[MAX_UTF_LENGTH + 4];
+     struct list_head list;
+ } qcmbr_queue_t;
++
+ LIST_HEAD(qcmbr_queue_head);
+ DEFINE_SPINLOCK(qcmbr_queue_lock);
++
++/* FLAG to distinguish QCMBR rsp from CFG80211 test mode */
++static boolean rsp_to_qcmbr = false;
+ #endif
+ #endif
+ 
+@@ -1077,7 +1081,8 @@ static int wlan_hdd_qcmbr_command(hdd_adapter_t *pAdapter, qcmbr_data_t *pqcmbr_
+             pqcmbr_data->copy_to_user = 0;
+             if (pqcmbr_data->length) {
+                 if (wlan_hdd_ftm_testmode_cmd(pqcmbr_data->buf,
+-                                              pqcmbr_data->length)
++                                              pqcmbr_data->length,
++                                              TRUE)
+                         != VOS_STATUS_SUCCESS) {
+                     ret = -EBUSY;
+                 } else {
+@@ -1193,6 +1198,7 @@ static void WLANQCMBR_McProcessMsg(v_VOID_t *message)
+ 
+     data_len = *((u_int32_t *)message) + sizeof(u_int32_t);
+     qcmbr_buf = kzalloc(sizeof(qcmbr_queue_t), GFP_KERNEL);
++
+     if (qcmbr_buf != NULL) {
+         memcpy(qcmbr_buf->utf_buf, message, data_len);
+         spin_lock_bh(&qcmbr_queue_lock);
+@@ -1214,11 +1220,17 @@ VOS_STATUS WLANFTM_McProcessMsg (v_VOID_t *message)
+     data = (u_int32_t *)message + 1;
+ 
+ #if defined(LINUX_QCMBR)
+-    WLANQCMBR_McProcessMsg(message);
+-#else
++    if (TRUE == rsp_to_qcmbr) {
++        WLANQCMBR_McProcessMsg(message);
++    } else {
++#endif
++
+ #ifdef CONFIG_NL80211_TESTMODE
+-    wlan_hdd_testmode_rx_event(data, (size_t)data_len);
++        wlan_hdd_testmode_rx_event(data, (size_t)data_len);
+ #endif
++
++#if defined(LINUX_QCMBR)
++    }
+ #endif
+ 
+     vos_mem_free(message);
+@@ -1226,13 +1238,17 @@ VOS_STATUS WLANFTM_McProcessMsg (v_VOID_t *message)
+     return VOS_STATUS_SUCCESS;
+ }
+ 
+-VOS_STATUS wlan_hdd_ftm_testmode_cmd(void *data, int len)
++VOS_STATUS wlan_hdd_ftm_testmode_cmd(void *data, int len, boolean from_qcmbr)
+ {
+     struct ar6k_testmode_cmd_data *cmd_data;
+ 
+     cmd_data = (struct ar6k_testmode_cmd_data *)
+                vos_mem_malloc(sizeof(*cmd_data));
+ 
++#if defined(LINUX_QCMBR)
++    rsp_to_qcmbr = from_qcmbr;
++#endif
++
+     if (!cmd_data) {
+         VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+                   ("Failed to allocate FTM command data"));
+-- 
+1.7.9.5
+

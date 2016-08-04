@@ -1,0 +1,4 @@
+We use different bluedroid and hardware from those customer is using.
+So don't directly patch the *.patch to Huawei's code.
+Please refer bluedroid.patch and hardware.patch for the modification.
+And copy the changed code into the relative file in customer's codebase.

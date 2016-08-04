@@ -1,0 +1,238 @@
+From 38e30ca6d9c5089450fffa3b631381207e8f94fd Mon Sep 17 00:00:00 2001
+From: Yi Chen <yichen@qti.qualcomm.com>
+Date: Mon, 18 Apr 2016 16:34:15 +0800
+Subject: [PATCH 1/7] QCACLD Dump FW crash to file. Signed-off-by: Yi Chen
+ <yichen@qti.qualcomm.com>
+
+---
+ CORE/SERVICES/BMI/ol_fw.c |  200 +++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 200 insertions(+)
+
+diff --git a/CORE/SERVICES/BMI/ol_fw.c b/CORE/SERVICES/BMI/ol_fw.c
+index 55461b9..005f4a8 100644
+--- a/CORE/SERVICES/BMI/ol_fw.c
++++ b/CORE/SERVICES/BMI/ol_fw.c
+@@ -1187,6 +1187,199 @@ void ol_schedule_fw_indication_work(struct ol_softc *scn)
+ A_UINT32 fw_stack_addr;
+ void *fw_ram_seg_addr[FW_RAM_SEG_CNT];
+ 
++#if defined(CONFIG_CRASH_DUMP_CLD) || defined(CONFIG_WLAN_FWLOG_FILE)
++
++#define GET_INODE_FROM_FILEP(filp) ((filp)->f_path.dentry->d_inode)
++
++int _readwrite_file(const char *filename, char *rbuf,
++	const char *wbuf, size_t length, int mode)
++{
++	int ret = 0;
++	struct file *filp = (struct file *)-ENOENT;
++	mm_segment_t oldfs;
++	oldfs = get_fs();
++	set_fs(KERNEL_DS);
++
++	do {
++		filp = filp_open(filename, mode, S_IRUSR);
++
++		if (IS_ERR(filp) || !filp->f_op) {
++			ret = -ENOENT;
++			break;
++		}
++
++		if (!filp->f_op->write || !filp->f_op->read) {
++			filp_close(filp, NULL);
++			ret = -ENOENT;
++			break;
++		}
++
++		if (length == 0) {
++			/* Read the length of the file only */
++			struct inode    *inode;
++
++			inode = GET_INODE_FROM_FILEP(filp);
++			if (!inode) {
++				printk(KERN_ERR
++					"_readwrite_file: Error 2\n");
++				ret = -ENOENT;
++				break;
++			}
++			ret = i_size_read(inode->i_mapping->host);
++			break;
++		}
++
++		if (wbuf) {
++			ret = filp->f_op->write(
++				filp, wbuf, length, &filp->f_pos);
++			if (ret < 0) {
++				printk(KERN_ERR
++					"_readwrite_file: Error 3\n");
++				break;
++			}
++		} else {
++			ret = filp->f_op->read(
++				filp, rbuf, length, &filp->f_pos);
++			if (ret < 0) {
++				printk(KERN_ERR
++					"_readwrite_file: Error 4\n");
++				break;
++			}
++		}
++	} while (0);
++
++	if (!IS_ERR(filp))
++		filp_close(filp, NULL);
++
++	set_fs(oldfs);
++	return ret;
++}
++
++#ifdef CONFIG_CRASH_DUMP_CLD
++#define DUMP_BUF_SIZE 20000 //backtrace + stack size is around 20K
++#define MAX_DUMP_FW_SIZE 100000
++
++#define CRASH_DUMP_FILE "/opt/var/log/cld_fwcrash.log"
++
++
++int check_dump_file_size(void)
++{
++	int status = 0, size = 0;
++	size = _readwrite_file(CRASH_DUMP_FILE, NULL, NULL, 0, O_RDONLY);
++	if (size > (MAX_DUMP_FW_SIZE - DUMP_BUF_SIZE)) {
++
++		printk(KERN_ERR "clean big log 0x%x\n", size);
++		status = _readwrite_file(CRASH_DUMP_FILE, NULL, NULL,
++			0, (O_WRONLY | O_TRUNC));
++	}
++
++	return status;
++}
++
++static int dump_fw_crash_to_file(struct ol_softc *scn)
++{
++	A_UINT32 *reg, pattern, i;
++	A_UINT32 MSPId = 0, mSPId = 0, SIId = 0, CRMId = 0, len;
++	A_UINT8 *data;
++#ifdef CONFIG_CRASH_DUMP_STACK
++	A_UINT32 remaining, start_addr = 0;
++#endif
++	char *buf;
++	unsigned int str_len = 0, buf_len = DUMP_BUF_SIZE;
++	int status = 0, dumpcomplete = 0;
++
++	buf = kmalloc(buf_len, GFP_ATOMIC);
++
++	if (buf == NULL) {
++		printk(KERN_ERR "No buffer available for crash log\n");
++		return -ENOMEM;
++	}
++
++	memset(buf, 0, buf_len);
++
++	data = scn->hif_sc->fw_data;
++	len = scn->hif_sc->fw_data_len;
++	pattern = *((A_UINT32 *) data);
++
++
++	if (pattern == FW_ASSERT_PATTERN) {
++		MSPId = (scn->target_fw_version & 0xf0000000) >> 28;
++		mSPId = (scn->target_fw_version & 0xf000000) >> 24;
++		SIId = (scn->target_fw_version & 0xf00000) >> 20;
++		CRMId = scn->target_fw_version & 0x7fff;
++		status = check_dump_file_size();
++		if (status)
++			printk(KERN_ERR "crash log file check status code 0x%x\n", status);
++		str_len = scnprintf(buf + str_len, buf_len - str_len, "Host SW version: %s\n", QWLAN_VERSIONSTR);
++		str_len += scnprintf(buf + str_len, buf_len - str_len, "FW version: %d.%d.%d.%d\n", MSPId, mSPId, SIId, CRMId);
++		if (vos_is_load_unload_in_progress(VOS_MODULE_ID_VOSS, NULL)) {
++			printk(KERN_INFO "%s: Loading/Unloading is in progress, ignore!\n",
++				__func__);
++			kfree(buf);
++			return 0;
++		}
++		reg = (A_UINT32 *) (data + 4);
++		for (i = 0; i < min_t(A_UINT32, len - 4, FW_REG_DUMP_CNT); i += 4) {
++			A_UINT8 temp_buf[128];
++			hex_dump_to_buffer(reg+i, 16, 16, 4, temp_buf, sizeof(temp_buf), false);
++			str_len += snprintf(buf + str_len, buf_len - str_len, "%#08x: %s\n", i*4, temp_buf);
++		}
++		scn->fw_ram_dumping = 0;
++
++		if (scn->enableFwSelfRecovery)
++			vos_set_logp_in_progress(VOS_MODULE_ID_VOSS, TRUE);
++	}
++#ifdef CONFIG_CRASH_DUMP_STACK
++	else if (pattern == FW_REG_PATTERN) {
++		reg = (A_UINT32 *) (data + 4);
++		start_addr = *reg++;
++		if (scn->fw_ram_dumping == 0) {
++			str_len += scnprintf(buf + str_len, buf_len - str_len, "Firmware stack dump:\n");
++			scn->fw_ram_dumping = 1;
++			fw_stack_addr = start_addr;
++		}
++		remaining = len - 8;
++		/* len is in byte, but it's printed in double-word. */
++		for (i = 0; i < (len - 8); i += 16) {
++			A_UINT8 temp_buf[128];
++			if ((*reg == FW_REG_END_PATTERN) && (i == len - 12)) {
++				scn->fw_ram_dumping = 0;
++				str_len += scnprintf(buf + str_len, buf_len - str_len, "Stack start address = %#08x\n",
++					fw_stack_addr);
++				dumpcomplete = 1;
++				pr_err("F/W crash log dump completed\n");
++				break;
++			}
++			hex_dump_to_buffer(reg, remaining, 16, 4, temp_buf,
++						sizeof(temp_buf), false);
++			str_len += scnprintf(buf + str_len, buf_len - str_len, "%#08x: %s\n", start_addr + i, temp_buf);
++			remaining -= 16;
++			reg += 4;
++		}
++	}
++#endif
++	status = _readwrite_file(CRASH_DUMP_FILE, NULL,
++			buf, str_len, (O_WRONLY | O_APPEND | O_CREAT));
++	if (status < 0)
++		printk(KERN_ERR "write failed with status code 0x%x\n", status);
++
++	if (dumpcomplete) {
++		if (vos_is_logp_in_progress(VOS_MODULE_ID_VOSS, NULL)) {
++				/* dispatch 'offline' uevent after FWDump */
++				A_MSLEEP(1500);
++				kobject_uevent(&scn->adf_dev->dev->kobj, KOBJ_OFFLINE);
++				vos_set_logp_in_progress(VOS_MODULE_ID_VOSS, FALSE);
++		}
++	}
++
++	kfree(buf);
++	return status;
++}
++#endif
++#endif
++
++
++
+ /* ol_ramdump_handler is to receive information of firmware crash dump, and
+  * save it in host memory. It consists of 5 parts: registers, call stack,
+  * DRAM dump, IRAM dump, and AXI dump, and they are reported to host in order.
+@@ -1201,6 +1394,12 @@ void *fw_ram_seg_addr[FW_RAM_SEG_CNT];
+  *            of the last packet is FW_RAMDUMP_END_PATTERN;
+  * IRAM dump and AXI dump are with the same format as DRAM dump.
+  */
++#ifdef CONFIG_CRASH_DUMP_CLD
++void ol_ramdump_handler(struct ol_softc *scn)
++{
++	dump_fw_crash_to_file(scn);
++}
++#else
+ void ol_ramdump_handler(struct ol_softc *scn)
+ {
+ 	A_UINT32 *reg, pattern, i, start_addr = 0;
+@@ -1307,6 +1506,7 @@ void ol_ramdump_handler(struct ol_softc *scn)
+ 		}
+ 	}
+ }
++#endif /* CONFIG_CRASH_DUMP_CLD */
+ #endif
+ 
+ #define REGISTER_DUMP_LEN_MAX   60
+-- 
+1.7.9.5
+

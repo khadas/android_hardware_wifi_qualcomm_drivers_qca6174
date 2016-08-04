@@ -1,0 +1,12 @@
+diff -Nuar a/system/netd/server/SoftapController.cpp b/system/netd/server/SoftapController.cpp
+--- a/system/netd/server/SoftapController.cpp	2015-11-02 12:39:11.803461516 +0800
++++ b/system/netd/server/SoftapController.cpp	2015-11-24 10:16:35.947751115 +0800
+@@ -209,6 +209,8 @@
+ 
+     if (strcmp(argv[3], "AP") == 0) {
+         fwpath = (char *)wifi_get_fw_path(WIFI_GET_FW_PATH_AP);
++        ALOGD("Softap fwReload - Ok");
++        return ResponseCode::SoftapStatusResult;
+     } else if (strcmp(argv[3], "P2P") == 0) {
+         fwpath = (char *)wifi_get_fw_path(WIFI_GET_FW_PATH_P2P);
+     } else if (strcmp(argv[3], "STA") == 0) {

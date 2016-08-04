@@ -1,0 +1,71 @@
+# Build list
+
+targetList := drivers drivers_firmware
+targetList += wpa_supplicant hostapd rootfs_build 
+
+default: ${targetList}
+wlan_tf_obj: drivers drivers_firmware rootfs_build copy_tf_binary
+wlan_rome_obj: drivers drivers_firmware rootfs_build copy_rome_binary
+#################################################################################################################################
+export BE_TEST_TOPDIR=${ATH_TOPDIR}/build/scripts/${BOARD_TYPE}
+export ROOTFS_PATH=${ATH_TOPDIR}/rootfs-cus11-04.build
+export WLAN_DRIVER_TOPDIR=$(ATH_TOPDIR)/drivers
+export BSP_PATCH_FILE_TOPDIR=${WLAN_DRIVER_TOPDIR}/patches/${BOARD_TYPE}/android_bsp_patch
+export PLATFORM_PATCH_FILE_TOPDIR=${WLAN_DRIVER_TOPDIR}/patches/android_bsp_patch/platform
+export ATHDIAG_TOPDIR=${ATH_TOPDIR}/drivers/qcacld-new/tools/athdiag
+
+#################################################################################################################################
+#
+# driver patch
+#
+
+custom_patch_tf_usb:
+	@echo Patch CLD driver
+	@cd ${WLAN_DRIVER_TOPDIR} && patch -s -p0 < ${WLAN_DRIVER_TOPDIR}/patches/${BOARD_TYPE}/cus11-04-001-cld_driver_tf_usb.patch
+
+custom_patch_rome_pcie:
+	@echo Patch CLD driver
+	@cd ${WLAN_DRIVER_TOPDIR} && patch -s -p0 < ${WLAN_DRIVER_TOPDIR}/patches/${BOARD_TYPE}/airkiss/cus11-04-002-cld_driver_rome_usb_airkiss.patch
+	cd ${WLAN_DRIVER_TOPDIR} && mv qcacld-2.0 qcacld-new
+#################################################################################################################################
+#
+# athdiag
+#
+athdiag_build: rootfs_prep athdiag_clean
+	@echo Build athdiag tool
+	cd $(ATHDIAG_TOPDIR) && \
+	${MAKEARCH} && \
+	cp $(ATHDIAG_TOPDIR)/athdiag $(INSTALL_ROOT)/sbin
+
+athdiag_clean:
+	@echo Clean athdiag tool
+	cd $(ATHDIAG_TOPDIR) && \
+	${MAKEARCH} clean
+	
+copy_tf_binary:
+	cd ${ROOTFS_PATH}/lib/modules && mv Tuffelo_wlan.ko qca_cld_wlan_Tuffelo.ko
+	@echo Copy BINARY to Android-apq8084 project
+	-mkdir ${ANDROID_APQ8084_PROJ_WLAN_CFG_PATH}
+	cp ${ROOTFS_PATH}/lib/modules/* ${ANDROID_APQ8084_PROJ_WLAN_DRV_PATH} && \
+	cp ${ROOTFS_PATH}/lib/firmware/wlan/* ${ANDROID_APQ8084_PROJ_WLAN_CFG_PATH}
+	@echo Copy BINARY DONE!
+
+copy_rome_binary:
+	cd ${ROOTFS_PATH}/lib/modules && mv wlan.ko qca_cld_wlan.ko
+	cp ${ROOTFS_PATH}/lib/modules/* ${ANDROID_APQ8084_PROJ_WLAN_DRV_PATH}
+	@echo Copy BINARY DONE
+#
+# Patch android-apq8084 framework
+#
+android_bsp_patch:
+	@echo Copy PATCH files to Android-apq8084 BSP
+	cp ${BSP_PATCH_FILE_TOPDIR}/${ANDROID_BSP_VERSION}/WLAN/* ${ANDROID_APQ8084_PROJ_PATH}
+	@echo Copy PATCH DONE!
+	@echo Patch android-apq8084 framework
+	cd ${ANDROID_APQ8084_PROJ_PATH} && ./autopatch.sh
+	@echo Patch android-apq8084 framework done!
+	
+#
+# Patch CLD driver and android-apq8084 framework
+#
+custom_patch_all: android_bsp_patch custom_patch_tf_usb

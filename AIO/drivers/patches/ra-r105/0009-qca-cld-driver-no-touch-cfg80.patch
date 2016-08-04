@@ -1,0 +1,112 @@
+--- CORE/SERVICES/HIF/PCIe/if_pci.c.orig	2016-07-06 15:43:10.831954686 +0800
++++ CORE/SERVICES/HIF/PCIe/if_pci.c	2016-07-06 15:43:22.699954903 +0800
+@@ -219,11 +219,11 @@
+         /* IMPORTANT: this extra read transaction is required to flush the posted write buffer */
+         tmp = A_PCI_READ32(sc->mem+(SOC_CORE_BASE_ADDRESS | PCIE_INTR_ENABLE_ADDRESS));
+ 
+-        if (tmp == 0xdeadbeef) {
+-            pr_err("BUG(%s): SoC returns 0xdeadbeef!!\n", __func__);
++	if (unlikely(tmp)){
++	    pr_alert("BUG(%s): Clear PCI interrupt failed. tmp=%x, mem=%x\n", __func__, tmp, (unsigned int)sc->mem);
+             print_config_soc_reg(sc);
+-            VOS_BUG(0);
+-        }
++	    //VOS_BUG(0);
++	} 
+ 
+         if (sc->hif_init_done == TRUE) {
+             if (Q_TARGET_ACCESS_END(hif_state->targid) < 0) {
+@@ -807,6 +807,12 @@
+         /* IMPORTANT: this extra read transaction is required to flush the posted write buffer */
+         tmp = A_PCI_READ32(sc->mem+(SOC_CORE_BASE_ADDRESS | PCIE_INTR_ENABLE_ADDRESS));
+ 
++	if (unlikely(tmp != 0x7fc00)){
++	    pr_alert("BUG(%s): Enable PCI interrupt failed. tmp=%x, mem=%x\n", __func__, tmp, (unsigned int)sc->mem);
++            print_config_soc_reg(sc);
++	    //VOS_BUG(0);
++	} 
++
+         if (hif_init_done == TRUE) {
+              HIF_fw_interrupt_handler(sc->irq_event, sc);
+              if(HIFTargetSleepStateAdjust(hif_state->targid, TRUE, FALSE) < 0) {
+@@ -1448,7 +1454,9 @@
+     int probe_again = 0;
+     u_int16_t device_id;
+     u_int16_t revision_id;
++#if defined(DISABLE_L1SS_STATES)
+     u_int32_t lcr_val;
++#endif
+ 
+     printk(KERN_INFO "%s:, con_mode= 0x%x\n", __func__, vos_get_conparam());
+ 
+@@ -1530,9 +1538,11 @@
+     /* Set bus master bit in PCI_COMMAND to enable DMA */
+     pci_set_master(pdev);
+ 
++#if 0
+     /* Temporary FIX: disable ASPM on peregrine. Will be removed after the OTP is programmed */
+     pci_read_config_dword(pdev, 0x80, &lcr_val);
+     pci_write_config_dword(pdev, 0x80, (lcr_val & 0xffffff00));
++#endif
+ 
+     /* Arrange for access to Target SoC registers. */
+     mem = pci_iomap(pdev, BAR_NUM, 0);
+@@ -1553,6 +1563,7 @@
+ 
+     OS_MEMZERO(sc, sizeof(*sc));
+     sc->mem = mem;
++    printk(KERN_ERR "sc->mem=%x\n", (unsigned int)sc->mem);
+     sc->pdev = pdev;
+     sc->dev = &pdev->dev;
+ 
+@@ -1719,8 +1730,10 @@
+         goto err_config;
+     }
+ 
++#if 0
+     /* Re-enable ASPM after firmware/OTP download is complete */
+     pci_write_config_dword(pdev, 0x80, lcr_val);
++#endif
+ 
+     hif_pci_pm_runtime_init(sc);
+ 
+@@ -2631,10 +2644,13 @@
+                   PCIE_INTR_FIRMWARE_MASK | PCIE_INTR_CE_MASK_ALL);
+     /* IMPORTANT: this extra read transaction is required to flush the posted write buffer */
+     tmp = A_PCI_READ32(sc->mem+(SOC_CORE_BASE_ADDRESS | PCIE_INTR_ENABLE_ADDRESS));
+-    if (tmp == 0xffffffff) {
+-         printk(KERN_ERR "%s: PCIe pcie link is down\n", __func__);
+-         VOS_ASSERT(0);
+-    }
++
++    if (unlikely(tmp)){
++        pr_alert("BUG(%s): Clear PCI interrupt failed. tmp=%x, mem=%x\n", __func__, tmp, (unsigned int)sc->mem);
++        print_config_soc_reg(sc);
++        VOS_ASSERT(0);
++	//VOS_BUG(0);
++    } 
+ 
+     if (HIFTargetSleepStateAdjust(targid, TRUE, FALSE) < 0) {
+         adf_os_spin_unlock_irqrestore(&hif_state->suspend_lock);
+@@ -2724,11 +2740,11 @@
+         tmp = A_PCI_READ32(sc->mem +
+                           (SOC_CORE_BASE_ADDRESS | PCIE_INTR_ENABLE_ADDRESS));
+ 
+-        if (tmp != 0xffffffff)
++        if (likely(tmp == 0x7fc00))
+             break;
+ 
+         if (retry > MAX_REG_READ_RETRIES) {
+-            pr_err("%s: PCIe link is possible down!\n", __func__);
++            pr_err("%s: BUG: PCIe link is possible down!\n", __func__);
+             print_config_soc_reg(sc);
+             VOS_ASSERT(0);
+             break;
+@@ -2957,6 +2973,7 @@
+ 	/* Disable ASPM when pkt log is enabled */
+ 	pci_read_config_dword(sc->pdev, 0x80, &lcr_val);
+ 	pci_write_config_dword(sc->pdev, 0x80, (lcr_val & 0xffffff00));
++	pr_err("%s: val= %x \n", __func__, lcr_val );
+ }
+ 
+ void hif_pci_save_htc_htt_config_endpoint(int htc_endpoint)

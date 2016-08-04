@@ -1,0 +1,14 @@
+#################################################################################################################################
+export WLAN_DRIVER_TOPDIR=$(ATH_TOPDIR)/drivers
+export QCA_ATH6KL_DIR=$(ATH_TOPDIR)/drivers/ath6kl
+
+export IF_TYPE=SDIO
+
+#################################################################################################################################
+#
+# driver patch
+#
+
+drivers_patch:
+	@echo Patch drivers
+	@cd ${QCA_ATH6KL_DIR} && patch -s -p1 < ${WLAN_DRIVER_TOPDIR}/patches/${BOARD_TYPE}/cus12-1-0000-Add-QCMBR-ioctl-support.patch

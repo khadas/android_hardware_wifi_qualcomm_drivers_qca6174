@@ -1,0 +1,173 @@
+From 2eab179f86109e0e054ff22cea373ab96ba91e97 Mon Sep 17 00:00:00 2001
+From: Kai Liu <kaliu@qti.qualcomm.com>
+Date: Mon, 15 Jun 2015 16:22:27 +0800
+Subject: [PATCH 3/7] Revert "cfg80211/mac80211: disconnect on suspend"
+
+This reverts commit 8125696991194aacb1173b6e8196d19098b44e17.
+The commit"cfg80211/mac80211: disconnect on suspend" forces disconnection
+on wlan interfaces if wake on wireless is not enabled from the user space.
+Wake on Wireless is enabled by default in wlan driver (CLD) and cfg80211
+layer never aware of wake on wirless enabled status done in wlan driver.
+
+To avoid the disconnection while going to suspend and keep wlan driver
+in WOW mode by default, the commit "cfg80211/mac80211: disconnect on
+suspend" should be reverted.
+
+CRs-Fixed: 540571
+Change-Id: I483fe0530f9f00c338680416449215af326e3df1
+Signed-off-by: Ganesh Kondabattini <ganeshk@codeaurora.org>
+---
+ net/wireless/core.c     |   43 ++++++++++++++++++++++++++++++++++---------
+ net/wireless/core.h     |    2 --
+ net/wireless/rdev-ops.h |    7 +++----
+ net/wireless/sysfs.c    |   25 +++++--------------------
+ 4 files changed, 42 insertions(+), 35 deletions(-)
+
+diff --git a/net/wireless/core.c b/net/wireless/core.c
+index f52a4cd..fa3b1f9 100644
+--- a/net/wireless/core.c
++++ b/net/wireless/core.c
+@@ -836,14 +836,6 @@ void __cfg80211_leave(struct cfg80211_registered_device *rdev,
+ 	}
+ }
+ 
+-void cfg80211_leave(struct cfg80211_registered_device *rdev,
+-		    struct wireless_dev *wdev)
+-{
+-	wdev_lock(wdev);
+-	__cfg80211_leave(rdev, wdev);
+-	wdev_unlock(wdev);
+-}
+-
+ void cfg80211_stop_iface(struct wiphy *wiphy, struct wireless_dev *wdev,
+ 			 gfp_t gfp)
+ {
+@@ -872,6 +864,7 @@ static int cfg80211_netdev_notifier_call(struct notifier_block *nb,
+ 	struct net_device *dev = netdev_notifier_info_to_dev(ptr);
+ 	struct wireless_dev *wdev = dev->ieee80211_ptr;
+ 	struct cfg80211_registered_device *rdev;
++	struct cfg80211_sched_scan_request *sched_scan_req;
+ 
+ 	if (!wdev)
+ 		return NOTIFY_DONE;
+@@ -926,7 +919,39 @@ static int cfg80211_netdev_notifier_call(struct notifier_block *nb,
+ 			dev->priv_flags |= IFF_DONT_BRIDGE;
+ 		break;
+ 	case NETDEV_GOING_DOWN:
+-		cfg80211_leave(rdev, wdev);
++		switch (wdev->iftype) {
++		case NL80211_IFTYPE_ADHOC:
++			cfg80211_leave_ibss(rdev, dev, true);
++			break;
++		case NL80211_IFTYPE_P2P_CLIENT:
++		case NL80211_IFTYPE_STATION:
++			ASSERT_RTNL();
++			sched_scan_req = rtnl_dereference(rdev->sched_scan_req);
++			if (sched_scan_req && dev == sched_scan_req->dev)
++				__cfg80211_stop_sched_scan(rdev, false);
++
++			wdev_lock(wdev);
++#ifdef CONFIG_CFG80211_WEXT
++			kfree(wdev->wext.ie);
++			wdev->wext.ie = NULL;
++			wdev->wext.ie_len = 0;
++			wdev->wext.connect.auth_type = NL80211_AUTHTYPE_AUTOMATIC;
++#endif
++			cfg80211_disconnect(rdev, dev,
++							WLAN_REASON_DEAUTH_LEAVING, true);
++			cfg80211_mlme_down(rdev, dev);
++			wdev_unlock(wdev);
++			break;
++		case NL80211_IFTYPE_MESH_POINT:
++			cfg80211_leave_mesh(rdev, dev);
++				break;
++		case NL80211_IFTYPE_AP:
++			cfg80211_stop_ap(rdev, dev, false);
++			break;
++		default:
++			break;
++		}
++		wdev->beacon_interval = 0;
+ 		break;
+ 	case NETDEV_DOWN:
+ 		cfg80211_update_iface_num(rdev, wdev->iftype, -1);
+diff --git a/net/wireless/core.h b/net/wireless/core.h
+index 7e3a3ce..6f28bb1 100644
+--- a/net/wireless/core.h
++++ b/net/wireless/core.h
+@@ -448,8 +448,6 @@ void cfg80211_update_iface_num(struct cfg80211_registered_device *rdev,
+ 
+ void __cfg80211_leave(struct cfg80211_registered_device *rdev,
+ 		      struct wireless_dev *wdev);
+-void cfg80211_leave(struct cfg80211_registered_device *rdev,
+-		    struct wireless_dev *wdev);
+ 
+ void cfg80211_stop_p2p_device(struct cfg80211_registered_device *rdev,
+ 			      struct wireless_dev *wdev);
+diff --git a/net/wireless/rdev-ops.h b/net/wireless/rdev-ops.h
+index f6d457d..3bc84ae 100644
+--- a/net/wireless/rdev-ops.h
++++ b/net/wireless/rdev-ops.h
+@@ -6,12 +6,11 @@
+ #include "core.h"
+ #include "trace.h"
+ 
+-static inline int rdev_suspend(struct cfg80211_registered_device *rdev,
+-			       struct cfg80211_wowlan *wowlan)
++static inline int rdev_suspend(struct cfg80211_registered_device *rdev)
+ {
+ 	int ret;
+-	trace_rdev_suspend(&rdev->wiphy, wowlan);
+-	ret = rdev->ops->suspend(&rdev->wiphy, wowlan);
++	trace_rdev_suspend(&rdev->wiphy, rdev->wiphy.wowlan_config);
++	ret = rdev->ops->suspend(&rdev->wiphy, rdev->wiphy.wowlan_config);
+ 	trace_rdev_return_int(&rdev->wiphy, ret);
+ 	return ret;
+ }
+diff --git a/net/wireless/sysfs.c b/net/wireless/sysfs.c
+index 9ee6bc1..00629c9 100644
+--- a/net/wireless/sysfs.c
++++ b/net/wireless/sysfs.c
+@@ -87,14 +87,6 @@ static int wiphy_uevent(struct device *dev, struct kobj_uevent_env *env)
+ }
+ 
+ #ifdef CONFIG_PM
+-static void cfg80211_leave_all(struct cfg80211_registered_device *rdev)
+-{
+-	struct wireless_dev *wdev;
+-
+-	list_for_each_entry(wdev, &rdev->wdev_list, list)
+-		cfg80211_leave(rdev, wdev);
+-}
+-
+ static int wiphy_suspend(struct device *dev, pm_message_t state)
+ {
+ 	struct cfg80211_registered_device *rdev = dev_to_rdev(dev);
+@@ -102,19 +94,12 @@ static int wiphy_suspend(struct device *dev, pm_message_t state)
+ 
+ 	rdev->suspend_at = get_seconds();
+ 
+-	rtnl_lock();
+-	if (rdev->wiphy.registered) {
+-		if (!rdev->wiphy.wowlan_config)
+-			cfg80211_leave_all(rdev);
+-		if (rdev->ops->suspend)
+-			ret = rdev_suspend(rdev, rdev->wiphy.wowlan_config);
+-		if (ret == 1) {
+-			/* Driver refuse to configure wowlan */
+-			cfg80211_leave_all(rdev);
+-			ret = rdev_suspend(rdev, NULL);
+-		}
++	if (rdev->ops->suspend) {
++		rtnl_lock();
++		if (rdev->wiphy.registered)
++			ret = rdev_suspend(rdev);
++		rtnl_unlock();
+ 	}
+-	rtnl_unlock();
+ 
+ 	return ret;
+ }
+-- 
+1.7.9.5
+

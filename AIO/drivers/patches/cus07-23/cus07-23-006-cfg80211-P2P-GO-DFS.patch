@@ -1,0 +1,52 @@
+diff -Nuar cfg80211.orig/include/net/cfg80211.h cfg80211/include/net/cfg80211.h
+--- cfg80211.orig/include/net/cfg80211.h	2016-06-20 11:52:59.437079984 +0800
++++ cfg80211/include/net/cfg80211.h	2016-06-21 10:10:04.903867808 +0800
+@@ -3767,8 +3767,8 @@
+ static inline struct sk_buff *
+ cfg80211_vendor_cmd_alloc_reply_skb(struct wiphy *wiphy, int approxlen)
+ {
+-        return __cfg80211_alloc_reply_skb(wiphy, NL80211_CMD_TESTMODE,
+-                                          NL80211_ATTR_TESTDATA, approxlen);
++        return __cfg80211_alloc_reply_skb(wiphy, NL80211_CMD_VENDOR,
++                                          NL80211_ATTR_VENDOR_DATA, approxlen);
+ }
+ 
+ struct sk_buff *__cfg80211_alloc_event_skb(struct wiphy *wiphy,
+diff -Nuar cfg80211.orig/net/wireless/chan.c cfg80211/net/wireless/chan.c
+--- cfg80211.orig/net/wireless/chan.c	2016-06-20 11:52:59.437079984 +0800
++++ cfg80211/net/wireless/chan.c	2016-06-21 10:10:04.915867809 +0800
+@@ -426,9 +426,7 @@
+ 	res = cfg80211_chandef_usable(wiphy, chandef,
+ 				      IEEE80211_CHAN_DISABLED |
+ 				      IEEE80211_CHAN_PASSIVE_SCAN |
+-				      IEEE80211_CHAN_NO_IBSS |
+-				      IEEE80211_CHAN_RADAR);
+-
++				      IEEE80211_CHAN_NO_IBSS);
+ 	trace_cfg80211_return_bool(res);
+ 	return res;
+ }
+diff -Nuar cfg80211.orig/net/wireless/nl80211.c cfg80211/net/wireless/nl80211.c
+--- cfg80211.orig/net/wireless/nl80211.c	2016-06-20 11:52:59.445079985 +0800
++++ cfg80211/net/wireless/nl80211.c	2016-06-21 10:12:18.443872449 +0800
+@@ -3224,6 +3224,7 @@
+ 	}
+ 
+ 	mutex_lock(&rdev->devlist_mtx);
++    radar_detect_width = 0;
+ 	err = cfg80211_can_use_iftype_chan(rdev, wdev, wdev->iftype,
+ 					   params.chandef.chan,
+ 					   CHAN_MODE_SHARED,
+diff -Nuar cfg80211.orig/net/wireless/util.c cfg80211/net/wireless/util.c
+--- cfg80211.orig/net/wireless/util.c	2016-06-20 11:52:59.453079985 +0800
++++ cfg80211/net/wireless/util.c	2016-06-21 10:10:04.907867809 +0800
+@@ -1234,8 +1234,7 @@
+ 	case NL80211_IFTYPE_MESH_POINT:
+ 	case NL80211_IFTYPE_P2P_GO:
+ 	case NL80211_IFTYPE_WDS:
+-		radar_required = !!(chan &&
+-				    (chan->flags & IEEE80211_CHAN_RADAR));
++		radar_required = false;
+ 		break;
+ 	case NL80211_IFTYPE_P2P_CLIENT:
+ 	case NL80211_IFTYPE_STATION:

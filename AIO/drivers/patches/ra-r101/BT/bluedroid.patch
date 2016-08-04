@@ -1,0 +1,211 @@
+diff -Naur bluedroid.orig/btif/include/btif_api.h bluedroid/btif/include/btif_api.h
+--- bluedroid.orig/btif/include/btif_api.h	2016-07-07 16:38:05.625596239 +0800
++++ bluedroid/btif/include/btif_api.h	2016-07-07 13:45:13.277406409 +0800
+@@ -372,6 +372,30 @@
+ 
+ /*******************************************************************************
+ **
++** Function         btif_host_sleep_notify
++**
++** Description     Sends a HCI Vendor specific command BTA_HOST_SLEEP_NOTIFY_CMD_OCF to the controller
++**
++** Returns          BT_STATUS_SUCCESS on success
++**
++*******************************************************************************/
++bt_status_t btif_host_sleep_notify(uint16_t sleep_delay);
++
++#ifdef CUST_NEED_WAKEUP_ACK
++/*******************************************************************************
++**
++** Function         btif_host_wakeup_ack
++**
++** Description     Sends a HCI Vendor specific command BTA_HOST_WAKEUP_ACK_CMD_OCF to the controller
++**
++** Returns          BT_STATUS_SUCCESS on success
++**
++*******************************************************************************/
++bt_status_t btif_host_wakeup_ack(void);
++#endif
++
++/*******************************************************************************
++**
+ ** Function         btif_dm_read_energy_info
+ **
+ ** Description     Reads the energy info from controller
+diff -Naur bluedroid.orig/btif/src/bluetooth.c bluedroid/btif/src/bluetooth.c
+--- bluedroid.orig/btif/src/bluetooth.c	2016-07-07 16:38:05.625596239 +0800
++++ bluedroid/btif/src/bluetooth.c	2016-07-07 16:24:32.289581354 +0800
+@@ -56,6 +56,8 @@
+ #include <bt_testapp.h>
+ #endif
+ 
++#include "bt_host_ver.h"
++
+ /************************************************************************************
+ **  Constants & Macros
+ ************************************************************************************/
+@@ -175,6 +177,10 @@
+ {
+     ALOGI("init");
+ 
++#ifdef BT_HOST_VERSION
++    ALOGE("Bluedroid host version = %s",BT_HOST_VERSION);
++#endif
++
+     /* sanity check */
+     if (interface_ready() == TRUE)
+         return BT_STATUS_DONE;
+@@ -504,6 +510,37 @@
+     return btif_dut_mode_send(opcode, buf, len);
+ }
+ 
++#define HOST_SLEEP_DELAY_MIN 1000
++#define HOST_SLEEP_DELAY_MAX 10000
++int host_sleep_notify(uint16_t sleep_delay/*ms*/)
++{
++    ALOGI("host_sleep_notify");
++
++    if(sleep_delay < HOST_SLEEP_DELAY_MIN ||sleep_delay > HOST_SLEEP_DELAY_MAX )
++    {
++        ALOGI("host_sleep_notify: invalid delay value: %d", sleep_delay);
++        return BT_STATUS_PARM_INVALID;
++    }
++    /* sanity check */
++    if (interface_ready() == FALSE)
++        return BT_STATUS_NOT_READY;
++
++    return btif_host_sleep_notify(sleep_delay);
++}
++
++#ifdef CUST_NEED_WAKEUP_ACK
++int host_wakeup_ack(void)
++{
++    ALOGI("host_wakeup_ack");
++
++    /* sanity check */
++    if (interface_ready() == FALSE)
++        return BT_STATUS_NOT_READY;
++
++    return btif_host_wakeup_ack();
++}
++#endif
++
+ #if BLE_INCLUDED == TRUE
+ int le_test_mode(uint16_t opcode, uint8_t* buf, uint8_t len)
+ {
+@@ -753,6 +790,10 @@
+     get_profile_interface,
+     dut_mode_configure,
+     dut_mode_send,
++    host_sleep_notify,
++#ifdef CUST_NEED_WAKEUP_ACK
++    host_wakeup_ack,
++#endif
+ #if BLE_INCLUDED == TRUE
+     le_test_mode,
+ #else
+diff -Naur bluedroid.orig/btif/src/btif_core.c bluedroid/btif/src/btif_core.c
+--- bluedroid.orig/btif/src/btif_core.c	2016-07-07 16:38:05.625596239 +0800
++++ bluedroid/btif/src/btif_core.c	2016-07-07 13:45:13.309406410 +0800
+@@ -947,6 +947,89 @@
+     return BT_STATUS_SUCCESS;
+ }
+ 
++/*******************************************************************************
++**
++** Function         btif_host_sleep_notify_cback
++**
++** Description     Callback invoked on completion of vendor specific sleep notify command
++**
++** Returns          None
++**
++*******************************************************************************/
++static void btif_host_sleep_notify_cback( tBTM_VSC_CMPL *p_buf )
++{
++    int i;
++
++    BTIF_TRACE_DEBUG("vs_cmpl: %04X", p_buf->opcode);
++
++    for(i=0;i<p_buf->param_len;i++)
++        BTIF_TRACE_DEBUG("vs_cmpl[%d]=%02X", i, p_buf->p_param_buf[i]);
++
++    HAL_CBACK(bt_hal_cbacks, host_sleep_notify_cb, p_buf->p_param_buf[0]);
++}
++
++/*******************************************************************************
++**
++** Function         btif_host_sleep_notify
++**
++** Description     Sends a HCI Vendor specific command BTA_HOST_SLEEP_NOTIFY_CMD_OCF to the controller
++**
++** Returns          BT_STATUS_SUCCESS on success
++**
++*******************************************************************************/
++bt_status_t btif_host_sleep_notify(uint16_t sleep_delay)
++{
++    uint8_t buf[2], *p=buf;
++
++    /* TODO: Check that opcode is a vendor command group */
++    BTIF_TRACE_DEBUG("%s", __FUNCTION__);
++
++    UINT16_TO_STREAM(p, sleep_delay);
++    BTM_VendorSpecificCommand(BTA_HOST_SLEEP_NOTIFY_CMD_OCF | HCI_GRP_VENDOR_SPECIFIC, sizeof(buf), buf, btif_host_sleep_notify_cback);
++    return BT_STATUS_SUCCESS;
++}
++
++#ifdef CUST_NEED_WAKEUP_ACK
++/*******************************************************************************
++**
++** Function         btif_host_sleep_notify_cback
++**
++** Description     Callback invoked on completion of vendor specific sleep notify command
++**
++** Returns          None
++**
++*******************************************************************************/
++static void btif_host_wakeup_ack_cback( tBTM_VSC_CMPL *p_buf )
++{
++    int i;
++
++    BTIF_TRACE_DEBUG("vs_cmpl: %04X", p_buf->opcode);
++
++    for(i=0;i<p_buf->param_len;i++)
++        BTIF_TRACE_DEBUG("vs_cmpl[%d]=%02X", i, p_buf->p_param_buf[i]);
++
++    HAL_CBACK(bt_hal_cbacks, host_wakeup_ack_cb, p_buf->p_param_buf[0]);
++}
++
++/*******************************************************************************
++**
++** Function         btif_host_wakeup_ack
++**
++** Description     Sends a HCI Vendor specific command BTA_HOST_WAKEUP_ACK_CMD_OCF to the controller
++**
++** Returns          BT_STATUS_SUCCESS on success
++**
++*******************************************************************************/
++bt_status_t btif_host_wakeup_ack(void)
++{
++    /* TODO: Check that opcode is a vendor command group */
++    BTIF_TRACE_DEBUG("%s", __FUNCTION__);
++
++    BTM_VendorSpecificCommand(BTA_HOST_WAKEUP_ACK_CMD_OCF | HCI_GRP_VENDOR_SPECIFIC, 0, NULL, btif_host_wakeup_ack_cback);
++    return BT_STATUS_SUCCESS;
++}
++#endif
++
+ /*****************************************************************************
+ **
+ **   btif api adapter property functions
+diff -Naur bluedroid.orig/stack/include/hcidefs.h bluedroid/stack/include/hcidefs.h
+--- bluedroid.orig/stack/include/hcidefs.h	2016-07-07 16:38:05.917596244 +0800
++++ bluedroid/stack/include/hcidefs.h	2016-07-07 13:45:13.337406410 +0800
+@@ -2839,6 +2839,8 @@
+ #define AMP_VSE_CHANSPEC_BAND_5G        0x1000
+ #define AMP_VSE_CHANSPEC_BAND_2G        0x2000
+ 
++#define BTA_HOST_SLEEP_NOTIFY_CMD_OCF   0x0095
++#define BTA_HOST_WAKEUP_ACK_CMD_OCF   0x0097
+ 
+ #endif
+ 

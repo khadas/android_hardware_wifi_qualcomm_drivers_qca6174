@@ -1,0 +1,298 @@
+diff --git a/drivers/net/wireless/ath/ath6kl-3.5/cfg80211.c b/drivers/net/wireless/ath/ath6kl-3.5/cfg80211.c
+index c2f7d8e..0b05979 100644
+--- a/drivers/net/wireless/ath/ath6kl-3.5/cfg80211.c
++++ b/drivers/net/wireless/ath/ath6kl-3.5/cfg80211.c
+@@ -7066,6 +7066,12 @@ struct ath6kl *ath6kl_core_alloc(struct device *dev)
+ 	}
+ 
+ 	ar->btc_status = 0;
++#ifdef CONFIG_LINUX_QCMBR
++	if (testmode == 2) {
++		INIT_LIST_HEAD(&ar->qcmbr_queue_head);
++		spin_lock_init(&ar->qcmbr_queue_lock);
++	}
++#endif
+ 	return ar;
+ }
+ 
+diff --git a/drivers/net/wireless/ath/ath6kl-3.5/core.h b/drivers/net/wireless/ath/ath6kl-3.5/core.h
+index 7d2cd50..736bb0e 100644
+--- a/drivers/net/wireless/ath/ath6kl-3.5/core.h
++++ b/drivers/net/wireless/ath/ath6kl-3.5/core.h
+@@ -1421,6 +1421,25 @@ struct bss_post_proc {
+ 	int aging_time;
+ };
+ 
++#ifdef CONFIG_LINUX_QCMBR
++#define ATH_XIOCTL_UNIFIED_UTF_CMD  0x1000
++#define ATH_XIOCTL_UNIFIED_UTF_RSP  0x1001
++#define MAX_UTF_LENGTH              1024
++
++typedef struct qcmbr_data_s {
++	unsigned int cmd;
++	unsigned int length;
++	unsigned char buf[MAX_UTF_LENGTH + 4];
++	unsigned int copy_to_user;
++} qcmbr_data_t;
++
++typedef struct qcmbr_queue_s {
++	unsigned char utf_buf[MAX_UTF_LENGTH + 4];
++	unsigned int length;
++	struct list_head list;
++} qcmbr_queue_t;
++#endif /* CONFIG_LINUX_QCMBR */
++
+ struct ath6kl_vif {
+ 	struct list_head list;
+ 	struct wireless_dev wdev;
+@@ -1942,6 +1961,11 @@ struct ath6kl {
+ 	u32 mcc_cc_state[10];
+ 	u32 mcc_p2p_dwell[10];
+ 	u32 btc_status;
++
++#ifdef CONFIG_LINUX_QCMBR
++   struct list_head qcmbr_queue_head;
++   spinlock_t qcmbr_queue_lock;
++#endif /* CONFIG_LINUX_QCMBR */
+ };
+ 
+ static inline void *ath6kl_priv(struct net_device *dev)
+diff --git a/drivers/net/wireless/ath/ath6kl-3.5/init.c b/drivers/net/wireless/ath/ath6kl-3.5/init.c
+index eecc5f9..d148eb5 100644
+--- a/drivers/net/wireless/ath/ath6kl-3.5/init.c
++++ b/drivers/net/wireless/ath/ath6kl-3.5/init.c
+@@ -3454,6 +3454,20 @@ void ath6kl_stop_txrx(struct ath6kl *ar)
+ 	 */
+ 	ath6kl_wmi_shutdown(ar->wmi);
+ 
++#ifdef CONFIG_LINUX_QCMBR
++	if (testmode == 2) {
++	    spin_lock_bh(&ar->qcmbr_queue_lock);
++	    if (!list_empty(&ar->qcmbr_queue_head)) {
++	        qcmbr_queue_t *msg_buf, *tmp_buf;
++	        list_for_each_entry_safe(msg_buf, tmp_buf, &ar->qcmbr_queue_head, list) {
++	            list_del(&msg_buf->list);
++	            kfree(msg_buf);
++	        }
++	    }
++	    spin_unlock_bh(&ar->qcmbr_queue_lock);
++	}	
++#endif /* CONFIG_LINUX_QCMBR */
++
+ 	clear_bit(WMI_ENABLED, &ar->flag);
+ 	if (ar->htc_target) {
+ 		ath6kl_dbg(ATH6KL_DBG_TRC, "%s: shut down htc\n", __func__);
+diff --git a/drivers/net/wireless/ath/ath6kl-3.5/main.c b/drivers/net/wireless/ath/ath6kl-3.5/main.c
+index 4755ed6..859a8bc 100644
+--- a/drivers/net/wireless/ath/ath6kl-3.5/main.c
++++ b/drivers/net/wireless/ath/ath6kl-3.5/main.c
+@@ -3061,6 +3061,108 @@ static int ath6kl_ioctl_get_if_freq(struct net_device *dev,
+ 	}
+ }
+ 
++#ifdef CONFIG_LINUX_QCMBR
++
++struct tcmd_tlv_response_head{
++	u32 perserve;
++	u32 act;
++	u16 len;
++};
++
++struct tcmd_qcmbr_header{
++	u16 lenth;
++	u16 mck_patten;
++	u32 act;
++	u32 reserved;
++};
++static int ath6kl_qcmbr_unified_ioctl(struct ath6kl_vif *vif,
++				qcmbr_data_t * pqcmbr_data)
++{
++	int ret=0;
++	struct ath6kl *ar = vif->ar;
++	qcmbr_queue_t *qcmbr_buf = NULL;
++	struct tcmd_tlv_response_head *tcmdtlvrxhead;
++	struct tcmd_qcmbr_header *tcmdqcmbrhead;
++
++	switch (pqcmbr_data->cmd) {
++		case ATH_XIOCTL_UNIFIED_UTF_CMD:
++		{
++			pqcmbr_data->copy_to_user = 0;
++			if(pqcmbr_data->length) {
++				ret = ath6kl_wmi_test_cmd(vif->ar->wmi, pqcmbr_data->buf, pqcmbr_data->length);
++			}
++		}
++		break;
++
++		case ATH_XIOCTL_UNIFIED_UTF_RSP:
++		{
++            if (!list_empty(&ar->qcmbr_queue_head)) {
++				pqcmbr_data->copy_to_user = 1;
++				spin_lock_bh(&ar->qcmbr_queue_lock);
++				qcmbr_buf = list_first_entry(&ar->qcmbr_queue_head,
++								qcmbr_queue_t, list);
++				list_del(&qcmbr_buf->list);
++				spin_unlock_bh(&ar->qcmbr_queue_lock);
++				ret = 0;
++			} else {
++				ret = -1;
++			}
++
++			if (!ret) {
++				memcpy(pqcmbr_data->buf, qcmbr_buf->utf_buf,
++					qcmbr_buf->length);
++				tcmdtlvrxhead = (struct tcmd_tlv_response_head *)qcmbr_buf->utf_buf;
++				tcmdqcmbrhead = (struct tcmd_qcmbr_header *)pqcmbr_data->buf;
++
++				pqcmbr_data->length = tcmdtlvrxhead->len;
++				tcmdqcmbrhead->lenth =  tcmdtlvrxhead->len;
++				tcmdqcmbrhead->mck_patten = 0x6004;
++				kfree(qcmbr_buf);
++			} else {
++				ret = -EAGAIN;
++			}
++		}
++		break;
++	}
++	return ret;
++}
++
++static int ath6kl_ioctl_tcmd(struct net_device *dev,
++				struct ifreq *rq,
++				int cmd)
++{
++	int ret = true;
++
++	struct ath6kl_vif *vif = netdev_priv(dev);
++	qcmbr_data_t *qcmbr_data;
++
++	qcmbr_data = kmalloc(sizeof(qcmbr_data_t), GFP_KERNEL);
++	if(qcmbr_data == NULL) {
++		ret = -ENOMEM;
++		goto exit;
++	}
++
++	memset(qcmbr_data, 0, sizeof(qcmbr_data_t));
++
++	if(copy_from_user(qcmbr_data, rq->ifr_data, sizeof(*qcmbr_data))) {
++		ret = -EFAULT;
++		goto exit;
++	}
++
++	ret = ath6kl_qcmbr_unified_ioctl(vif, qcmbr_data);
++
++	if(qcmbr_data->copy_to_user) {
++		ret = copy_to_user(rq->ifr_data, qcmbr_data->buf,
++		qcmbr_data->length+sizeof(struct tcmd_qcmbr_header));
++		printk(KERN_DEBUG "copy to user done with len %d + header size\n", qcmbr_data->length);
++	}
++
++exit:
++	kfree(qcmbr_data);
++	return ret;
++}
++#endif /* CONFIG_LINUX_QCMBR */
++
+ int ath6kl_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
+ {
+ 	struct ath6kl *ar = ath6kl_priv(dev);
+@@ -3097,12 +3199,18 @@ case IEEE80211_IOCTL_KICKMAC:
+ 	case IEEE80211_IOCTL_DELMAC:
+ 	case IEEE80211_IOCTL_GET_MACADDR:
+ #endif
++		ret = ath6kl_ioctl_standard(dev, rq, cmd);
++		break;
+ #ifdef TX99_SUPPORT
+ 	case SIOCIOCTLTX99:/* TX99 */
+ #else
+ 	case ATH6KL_IOCTL_STANDARD13:	/* TX99 */
+ #endif
++#ifdef CONFIG_LINUX_QCMBR
++		ret = ath6kl_ioctl_tcmd(dev, rq, cmd);
++#else
+ 		ret = ath6kl_ioctl_standard(dev, rq, cmd);
++#endif /* CONFIG_LINUX_QCMBR */
+ 		break;
+ #ifndef CE_SUPPORT
+ 	case ATH6KL_IOCTL_WEXT_PRIV6:
+diff --git a/drivers/net/wireless/ath/ath6kl-3.5/testmode.c b/drivers/net/wireless/ath/ath6kl-3.5/testmode.c
+index 58a1c3d..730357c 100644
+--- a/drivers/net/wireless/ath/ath6kl-3.5/testmode.c
++++ b/drivers/net/wireless/ath/ath6kl-3.5/testmode.c
+@@ -77,31 +77,56 @@ void ath6kl_tm_rx_report_event(struct ath6kl *ar, void *buf, size_t buf_len)
+ 
+ void ath6kl_tm_rx_event(struct ath6kl *ar, void *buf, size_t buf_len)
+ {
+-	struct sk_buff *skb;
+-
+-	if (!buf || buf_len == 0) {
+-		printk(KERN_ERR "buf buflen is empty\n");
+-		return;
+-	}
+-
+-	skb = cfg80211_testmode_alloc_event_skb(ar->wiphy, buf_len, GFP_ATOMIC);
+-
+-	if (!skb) {
+-		printk(KERN_ERR "failed to allocate testmode rx skb!\n");
+-		return;
+-	}
+-
+-	NLA_PUT_U32(skb, ATH6KL_TM_ATTR_CMD, ATH6KL_TM_CMD_TCMD);
+-	NLA_PUT(skb, ATH6KL_TM_ATTR_DATA, buf_len, buf);
+-	cfg80211_testmode_event(skb, GFP_ATOMIC);
+-	return;
++    if(ar->testmode == 2)
++    {
++        qcmbr_queue_t *qcmbr_buf = NULL;
++
++        printk(KERN_DEBUG "%s\n", __func__);
++
++        if(buf_len == 0) {
++            printk(KERN_ERR "buf_len 0 at %s\n", __func__);
++            return;
++        }
++
++        qcmbr_buf = kmalloc(sizeof(qcmbr_queue_t), GFP_KERNEL);
++        if(qcmbr_buf != NULL) {
++            qcmbr_buf->length = buf_len;
++            memcpy(qcmbr_buf->utf_buf, buf, buf_len);
++            spin_lock_bh(&ar->qcmbr_queue_lock);
++            list_add_tail(&(qcmbr_buf->list), &ar->qcmbr_queue_head);
++            spin_unlock_bh(&ar->qcmbr_queue_lock);
++        }else {
++            printk(KERN_ERR " allocate failed %s\n", __func__);
++        }
++        return;
++    }
++    else
++    {
++        struct sk_buff *skb;
++
++        if (!buf || buf_len == 0) {
++            printk(KERN_ERR "buf buflen is empty\n");
++            return;
++        }
++
++        skb = cfg80211_testmode_alloc_event_skb(ar->wiphy, buf_len, GFP_ATOMIC);
++
++        if (!skb) {
++            printk(KERN_ERR "failed to allocate testmode rx skb!\n");
++            return;
++        }
++
++        NLA_PUT_U32(skb, ATH6KL_TM_ATTR_CMD, ATH6KL_TM_CMD_TCMD);
++        NLA_PUT(skb, ATH6KL_TM_ATTR_DATA, buf_len, buf);
++        cfg80211_testmode_event(skb, GFP_ATOMIC);
++        return;
+ 
+ #ifdef _NLA_PUT_ERR_RTN
+ nla_put_failure:
+-	kfree_skb(skb);
+-	printk(KERN_ERR "nla_put failed on testmode rx skb!\n");
++        kfree_skb(skb);
++        printk(KERN_ERR "nla_put failed on testmode rx skb!\n");
+ #endif
+-
++    }
+ }
+ 
+ #ifdef ATH6KL_SUPPORT_WLAN_HB

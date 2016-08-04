@@ -1,0 +1,83 @@
+diff -Nuar a/hardware/libhardware_legacy/include/hardware_legacy/wifi.h b/hardware/libhardware_legacy/include/hardware_legacy/wifi.h
+--- a/hardware/libhardware_legacy/include/hardware_legacy/wifi.h
++++ b/hardware/libhardware_legacy/include/hardware_legacy/wifi.h
+@@ -41,7 +41,9 @@
+  * @return 0 on success, < 0 on failure.
+  */
+ int is_wifi_driver_loaded();
+-
++int wifi_load_ap_driver();
++int wifi_unload_ap_driver();
++int is_wifi_ap_driver_loaded();
+ 
+ /**
+  * Start supplicant.
+diff -Nuar a/hardware/libhardware_legacy/wifi/wifi.c b/hardware/libhardware_legacy/wifi/wifi.c
+--- a/hardware/libhardware_legacy/wifi/wifi.c
++++ b/hardware/libhardware_legacy/wifi/wifi.c
+@@ -105,6 +105,14 @@
+ static const char DRIVER_MODULE_PATH[]  = WIFI_DRIVER_MODULE_PATH;
+ static const char DRIVER_MODULE_ARG[]   = WIFI_DRIVER_MODULE_ARG;
+ #endif
++#define AP_DRIVER_MODULE_NAME "Tuffelo_wlan"
++#define AP_DRIVER_MODULE_PATH "/system/lib/modules/qca_cld/qca_cld_wlan_Tuffelo.ko"
++#define AP_DRIVER_MODULE_ARG ""
++static const char SAP_DRIVER_MODULE_NAME[]  = AP_DRIVER_MODULE_NAME;
++static const char SAP_DRIVER_MODULE_TAG[]   = AP_DRIVER_MODULE_NAME " ";
++static const char SAP_DRIVER_MODULE_PATH[]  = AP_DRIVER_MODULE_PATH;
++static const char SAP_DRIVER_MODULE_ARG[]   = AP_DRIVER_MODULE_ARG;
++
+ static const char FIRMWARE_LOADER[]     = WIFI_FIRMWARE_LOADER;
+ static const char DRIVER_PROP_NAME[]    = "wlan.driver.status";
+ static const char SUPPLICANT_NAME[]     = "wpa_supplicant";
+@@ -292,6 +300,50 @@
+ #endif
+ }
+ 
++int is_wifi_ap_driver_loaded() {
++    FILE *proc;
++    char line[sizeof(SAP_DRIVER_MODULE_TAG)+10];
++
++    /*
++     * If the property says the driver is loaded, check to
++     * make sure that the property setting isn't just left
++     * over from a previous manual shutdown or a runtime
++     * crash.
++     */
++    if ((proc = fopen(MODULE_FILE, "r")) == NULL) {
++        ALOGW("Could not open %s: %s", MODULE_FILE, strerror(errno));
++        return 0;
++    }
++    while ((fgets(line, sizeof(line), proc)) != NULL) {
++        if (strncmp(line, SAP_DRIVER_MODULE_TAG, strlen(SAP_DRIVER_MODULE_TAG)) == 0) {
++            fclose(proc);
++            return 1;
++        }
++    }
++    fclose(proc);
++    return 0;
++}
++
++int wifi_unload_ap_driver()
++{
++    //to speed up load/unload, we don't unload softap driver now.
++    return 0;
++}
++
++
++int wifi_load_ap_driver()
++{
++    char driver_status[PROPERTY_VALUE_MAX];
++    int count = 100; /* wait at most 20 seconds for completion */
++
++    if (is_wifi_ap_driver_loaded()) {
++        return 0;
++    }
++    if (insmod(SAP_DRIVER_MODULE_PATH, SAP_DRIVER_MODULE_ARG) < 0)
++        return -1;
++
++    return 0;
++}
+ int ensure_entropy_file_exists()
+ {
+     int ret;

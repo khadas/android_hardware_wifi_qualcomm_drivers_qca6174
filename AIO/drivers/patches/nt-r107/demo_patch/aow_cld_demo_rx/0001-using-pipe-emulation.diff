@@ -1,0 +1,127 @@
+diff --git a/CORE/HDD/src/wlan_hdd_direct_audio.c b/CORE/HDD/src/wlan_hdd_direct_audio.c
+index fc8c5af..e802a01 100644
+--- a/CORE/HDD/src/wlan_hdd_direct_audio.c
++++ b/CORE/HDD/src/wlan_hdd_direct_audio.c
+@@ -38,8 +38,108 @@
+ 
+ #ifdef DIRECT_AUDIO_SUPPORT
+ #define SDA_DEBUG	1
++#define FILE_DEBUG
+ #define TSFDATASIZE	4
+ 
++#ifdef UDPDBG
++#include <linux/netdevice.h>
++#include <linux/ip.h>
++#include <linux/in.h>
++#include <linux/delay.h>
++#define CONNECT_PORT 0x43ff
++#define INADDR_SEND ((unsigned long int)0x7f000001) /* local addr 127.0.0.1 */
++struct socket *sock_send;
++struct sockaddr_in addr_send;
++
++int initial_socket() {
++	static int initialized = 0;
++	if (!initialized)
++	{
++		int err;
++		/* create a socket */
++		if ((err = sock_create(AF_INET, SOCK_DGRAM, IPPROTO_UDP, &sock_send)) < 0)
++		{
++			VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,
++                                  "Could not create a datagram socket, error = %d\n", -ENXIO);
++			return initialized;
++		}
++		memset(&addr_send, 0, sizeof(struct sockaddr));
++		addr_send.sin_family = AF_INET;
++		addr_send.sin_addr.s_addr = htonl(INADDR_SEND);
++		addr_send.sin_port = htons(CONNECT_PORT);
++		initialized = 1;
++	}
++	return initialized;
++}
++
++int ksocket_send(unsigned char *buf, int len)
++{
++        struct msghdr msg;
++        struct iovec iov;
++        mm_segment_t oldfs;
++        int size = 0;
++
++        if (!initial_socket() || sock_send->sk==NULL) {
++		VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,"invalid socket\n");
++		return 0;
++	}
++
++        iov.iov_base = buf;
++        iov.iov_len = len;
++
++        msg.msg_flags = 0;
++        msg.msg_name = &addr_send;
++        msg.msg_namelen  = sizeof(struct sockaddr_in);
++        msg.msg_control = NULL;
++        msg.msg_controllen = 0;
++        msg.msg_iov = &iov;
++        msg.msg_iovlen = 1;
++        msg.msg_control = NULL;
++
++        oldfs = get_fs();
++        set_fs(KERNEL_DS);
++        size = sock_sendmsg(sock_send,&msg,len);
++        set_fs(oldfs);
++
++        return size;
++}
++#endif
++
++#ifdef FILE_DEBUG
++#define DBG_FILE_PATH "/tmp/aowpipe"
++struct file *debug_fp = NULL;
++
++void opendbgfile(void)
++{
++	if(!debug_fp)
++		debug_fp = filp_open((const char *)DBG_FILE_PATH, O_WRONLY, 0666);
++}
++
++int writefile(u8* buf, int len)
++{
++	mm_segment_t pre_fd;
++	int filelen = 0;
++
++	pre_fd = get_fs();
++	set_fs(KERNEL_DS);
++	if (debug_fp && !IS_ERR(debug_fp))	{
++		if (debug_fp->f_op && debug_fp->f_op->write)	{
++			debug_fp->f_op->write(debug_fp, buf, len, &debug_fp->f_pos);
++			filelen = debug_fp->f_dentry->d_inode->i_size;
++		}
++	}
++	set_fs(pre_fd);
++	return filelen;
++}
++
++void closedbgfile(void)
++{
++//	if (debug_fp && !IS_ERR(debug_fp)) {
++//		filp_close(debug_fp, 0);
++//		debug_fp = NULL;
++//	}
++}
++#endif
+ #define DIRECT_AUDIO_LLC_TYPE 0x43FF
+ #if SDA_DEBUG
+ #define MAX_BUF_SIZE 1500 // bytes
+@@ -307,6 +407,14 @@ void SDA_Rx_fun( struct net_device *dev, struct sk_buff *skb)
+ 	}
+ rx_fail:
+ 	dev_kfree_skb(skb);
++#elif defined FILE_DEBUG //use pipe as simulation device
++	opendbgfile();
++	writefile(skb->data+TSFDATASIZE, skb->len-TSFDATASIZE);
++	closedbgfile();
++	dev_kfree_skb(skb);
++#elif defined UDPDBG //use UDP stream as simulation device
++	ksocket_send(skb->data+TSFDATASIZE, skb->len-TSFDATASIZE);
++	dev_kfree_skb(skb);
+ #endif
+ }

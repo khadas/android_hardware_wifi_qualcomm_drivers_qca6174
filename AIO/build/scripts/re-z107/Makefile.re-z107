@@ -1,0 +1,226 @@
+# Build list
+
+targetList := drivers drivers_firmware
+#drivers_firmware_transfer 
+targetList += wpa_supplicant hostapd
+#targetList += qcmbr
+targetList += rootfs_build
+
+default: ${targetList}
+
+#################################################################################################################################
+export SIGMADUT_TOPDIR=${ATH_TOPDIR}/apps/sigma-dut
+export BE_TEST_TOPDIR=${ATH_TOPDIR}/build/scripts/${BOARD_TYPE}
+export WLAN_DRIVER_TOPDIR=$(ATH_TOPDIR)/drivers
+export ATHDIAG_TOPDIR=${ATH_TOPDIR}/drivers/qcacld-new/tools/athdiag
+export BLUEZ_TOPDIR=${ATH_TOPDIR}/apps/bluez
+export PATCHES_PATH=${WLAN_DRIVER_TOPDIR}/patches/${BOARD_TYPE}
+
+# patch to backports for BlueZ 
+# backports-3.12 >3.10, so 0015 and 0020 patches are not needed    
+define patch_backports_bluetooth
+	@cd ${WLAN_DRIVER_TOPDIR}/backports && patch -s -p1 < ${PATCHES_PATH}/bluetooth/backports/0001-Bluetooth-x86-Rome-driver-support.patch
+	@cd ${WLAN_DRIVER_TOPDIR}/backports && patch -s -p1 < ${PATCHES_PATH}/bluetooth/backports/0002-Bluetooth-Enable-auto-suspend-in-bt-usb-client-drive.patch
+	@cd ${WLAN_DRIVER_TOPDIR}/backports && patch -s -p1 < ${PATCHES_PATH}/bluetooth/backports/0003-bluetooth-Fix-SCO-connection-synchronization.patch
+	@cd ${WLAN_DRIVER_TOPDIR}/backports && patch -s -p1 < ${PATCHES_PATH}/bluetooth/backports/0004-bluetooth-Check-FW-status-before-downloading-the-fir.patch
+	@cd ${WLAN_DRIVER_TOPDIR}/backports && patch -s -p1 < ${PATCHES_PATH}/bluetooth/backports/0005-bluetooth-Rename-BT-Firmware-files.patch
+	@cd ${WLAN_DRIVER_TOPDIR}/backports && patch -s -p1 < ${PATCHES_PATH}/bluetooth/backports/0006-bluetooth-Send-HCI-RESET-during-BT-OFF.patch
+	@cd ${WLAN_DRIVER_TOPDIR}/backports && patch -s -p1 < ${PATCHES_PATH}/bluetooth/backports/0007-Bluetooth-add-Qualcomm-In-Band-Sleep-support-to-hci_.patch
+	@cd ${WLAN_DRIVER_TOPDIR}/backports && patch -s -p1 < ${PATCHES_PATH}/bluetooth/backports/0008-bluetooth-hci_ibs-Vote-on-off-UART-clocks-in-non-ato.patch
+	@cd ${WLAN_DRIVER_TOPDIR}/backports && patch -s -p1 < ${PATCHES_PATH}/bluetooth/backports/0009-bluetooth-use-corect-struct-member-and-number-of-pro.patch
+	@cd ${WLAN_DRIVER_TOPDIR}/backports && patch -s -p1 < ${PATCHES_PATH}/bluetooth/backports/0010-bluetooth-hci_ibs-disable-irqs-when-spinlock-is-acqu.patch
+	@cd ${WLAN_DRIVER_TOPDIR}/backports && patch -s -p1 < ${PATCHES_PATH}/bluetooth/backports/0011-bluetooth-Configure-the-Tx-idle-timeout-to-1sec.patch
+	@cd ${WLAN_DRIVER_TOPDIR}/backports && patch -s -p1 < ${PATCHES_PATH}/bluetooth/backports/0012-bluetooth-Type-cast-the-received-data-before-parsing.patch
+	@cd ${WLAN_DRIVER_TOPDIR}/backports && patch -s -p1 < ${PATCHES_PATH}/bluetooth/backports/0013-bluetooth-Add-support-for-ROME-3.0.patch
+	@cd ${WLAN_DRIVER_TOPDIR}/backports && patch -s -p1 < ${PATCHES_PATH}/bluetooth/backports/0014-bluetooth-Configure-DUT-as-MASTER-for-outgoing-conne.patch
+
+	@cd ${WLAN_DRIVER_TOPDIR}/backports && patch -s -p1 < ${PATCHES_PATH}/bluetooth/backports/0016-bluetooth-Check-for-NULL-pointers-in-input-args.patch
+	@cd ${WLAN_DRIVER_TOPDIR}/backports && patch -s -p1 < ${PATCHES_PATH}/bluetooth/backports/0017-bluetooth-Notify-connection-deletion-only-for-SCO-ES.patch
+	@cd ${WLAN_DRIVER_TOPDIR}/backports && patch -s -p1 < ${PATCHES_PATH}/bluetooth/backports/0018-Bluetooth-Fix-ERTM-L2CAP-resend-packet.patch
+	@cd ${WLAN_DRIVER_TOPDIR}/backports && patch -s -p1 < ${PATCHES_PATH}/bluetooth/backports/0019-Bluetooth-Fix-crash-in-l2cap_chan_send-after-l2cap_c.patch
+	@cd ${WLAN_DRIVER_TOPDIR}/backports && patch -s -p1 < ${PATCHES_PATH}/bluetooth/backports/0021-bluetooth-return-on-incorrect-version-or-firmware-do.patch
+	@cd ${WLAN_DRIVER_TOPDIR}/backports && patch -s -p1 < ${PATCHES_PATH}/bluetooth/backports/0022-bluetooth-Add-support-for-Tufello-1.1.patch
+	@cd ${WLAN_DRIVER_TOPDIR}/backports && patch -s -p1 < ${PATCHES_PATH}/bluetooth/backports/0023-Bluetooth-kill-all-the-anchored-URBs-on-USB-device-d.patch
+	@cd ${WLAN_DRIVER_TOPDIR}/backports && patch -s -p1 < ${PATCHES_PATH}/bluetooth/backports/0024-Bluetooth-Avoid-Spurious-AMP-node-access-if-not-crea.patch
+	@cd ${WLAN_DRIVER_TOPDIR}/backports && patch -s -p1 < ${PATCHES_PATH}/bluetooth/backports/0025-Bluetooth-change-cancel_delayed_work-to-cancel_delay.patch
+
+	
+	@cd ${WLAN_DRIVER_TOPDIR}/backports && sed -i '/hci_uart-objs/ i\hci_uart-\$(CPTCFG_BT_HCIUART_IBS)  += hci_ibs.o' drivers/bluetooth/Makefile
+	@cd ${WLAN_DRIVER_TOPDIR}/backports && sed -i '/BT_HCIUART=/i \BT_HCIUART_IBS' .local-symbols
+
+endef
+
+# patch to for BlueZ application
+define patch_bluez_application
+	@cd ${BLUEZ_TOPDIR}/ && patch -s -p1 < ${PATCHES_PATH}/bluetooth/bluez/0001-bluetooth-Add-bluetooth-support-for-QCA6174-chip.patch
+	@cd ${BLUEZ_TOPDIR}/ && patch -s -p1 < ${PATCHES_PATH}/bluetooth/bluez/0002-bluetooth-Enable-3Mbps-baud-rate-support.patch
+	@cd ${BLUEZ_TOPDIR}/ && patch -s -p1 < ${PATCHES_PATH}/bluetooth/bluez/0003-bluetooth-Remove-unused-functions-in-the-firmware-do.patch
+	@cd ${BLUEZ_TOPDIR}/ && patch -s -p1 < ${PATCHES_PATH}/bluetooth/bluez/0004-bluetooth-Configure-BD-Address.patch
+	@cd ${BLUEZ_TOPDIR}/ && patch -s -p1 < ${PATCHES_PATH}/bluetooth/bluez/0005-bluetooth-Fix-bug-in-firmware-parsing-mechanism.patch
+	@cd ${BLUEZ_TOPDIR}/ && patch -s -p1 < ${PATCHES_PATH}/bluetooth/bluez/0006-bluetooth-Enable-bluetooth-low-power-mode-functional.patch
+	@cd ${BLUEZ_TOPDIR}/ && patch -s -p1 < ${PATCHES_PATH}/bluetooth/bluez/0007-bluetooth-Check-TTY-buffer-for-data-availability-bef.patch
+	@cd ${BLUEZ_TOPDIR}/ && patch -s -p1 < ${PATCHES_PATH}/bluetooth/bluez/0008-bluetooth-Add-support-for-TUFEELO-firmware-download.patch
+	@cd ${BLUEZ_TOPDIR}/ && patch -s -p1 < ${PATCHES_PATH}/bluetooth/bluez/0009-bluetooth-Use-correct-TTY-ioctl-calls-for-flow-contr.patch
+	@cd ${BLUEZ_TOPDIR}/ && patch -s -p1 < ${PATCHES_PATH}/bluetooth/bluez/0010-bluetooth-Add-support-for-ROME-3.2-SOC.patch
+	@cd ${BLUEZ_TOPDIR}/ && patch -s -p1 < ${PATCHES_PATH}/bluetooth/bluez/0011-Override-PCM-Settings-by-reading-configuration-file.patch
+	@cd ${BLUEZ_TOPDIR}/ && patch -s -p1 < ${PATCHES_PATH}/bluetooth/bluez/0012-Add-support-for-Tufello-1.1-SOC.patch 
+	@cd ${BLUEZ_TOPDIR}/ && patch -s -p1 < ${PATCHES_PATH}/bluetooth/bluez/0013-core-Fix-concurrent-authorizations.patch 
+	@cd ${BLUEZ_TOPDIR}/ && patch -s -p1 < ${PATCHES_PATH}/bluetooth/bluez/0014-Revert-core-Fix-unnecessary-calls-to-agent_cancel.patch 
+
+endef
+
+
+define bluez_prepare_start
+	@echo ==========================================
+	@echo Installing BlueZ Dependency Libraries....
+	@echo ==========================================
+	@cd ${BLUEZ_TOPDIR} && \
+	sudo apt-get install libgtk2.0-dev -y && \
+	sudo apt-get install dbus-*dev -y && \
+	sudo apt-get install libical-dev -y && \
+	sudo apt-get install libreadline-dev -y && \
+	sudo apt-get install libtool -y && \
+	sudo apt-get install automake1.11 -y && \
+	sudo apt-get install libudev-dev -y && \
+	libtoolize --force  && \
+	aclocal  && \
+	autoheader && \
+	automake --force-missing --add-missing  && \
+	autoconf
+
+	@echo ======================
+	@echo Configure BlueZ
+	@echo ======================
+	@cd ${BLUEZ_TOPDIR} && \
+	./configure --prefix=/usr --mandir=/usr/share/man --sysconfdir=/etc --localstatedir=/var \
+	--enable-experimental --with-systemdsystemunitdir=/lib/systemd/system \
+	--with-systemduserunitdir=/usr/lib/systemd 
+
+endef
+
+#################################################################################################################################
+#
+# driver patch
+#
+rome_usb_fw_to_h:
+	@echo Transforming Rome usb firmware binaries to header files
+	@sudo chmod +x ${ATH_TOPDIR}/build/tools/bin2hex.sh
+	@cd ${ATH_TOPDIR}/build/tools && ./bin2hex.sh ${WLAN_DRIVER_TOPDIR}/firmware/WLAN-firmware/athsetup.bin ${WLAN_DRIVER_TOPDIR}/qcacld-new/CORE/SERVICES/BMI/athsetup.h athsetup_bin
+	@cd ${ATH_TOPDIR}/build/tools && ./bin2hex.sh ${WLAN_DRIVER_TOPDIR}/firmware/WLAN-firmware/athwlan.bin ${WLAN_DRIVER_TOPDIR}/qcacld-new/CORE/SERVICES/BMI/athwlan.h athwlan_bin
+	@cd ${ATH_TOPDIR}/build/tools && ./bin2hex.sh ${WLAN_DRIVER_TOPDIR}/firmware/WLAN-firmware/fakeboar.bin ${WLAN_DRIVER_TOPDIR}/qcacld-new/CORE/SERVICES/BMI/fakeboar.h fakeboar_bin
+	@cd ${ATH_TOPDIR}/build/tools && ./bin2hex.sh ${WLAN_DRIVER_TOPDIR}/firmware/WLAN-firmware/otp.bin ${WLAN_DRIVER_TOPDIR}/qcacld-new/CORE/SERVICES/BMI/otp.h otp_bin
+	@cd ${ATH_TOPDIR}/build/tools && ./bin2hex.sh ${WLAN_DRIVER_TOPDIR}/firmware/WLAN-firmware/qca61x4.bin ${WLAN_DRIVER_TOPDIR}/qcacld-new/CORE/SERVICES/BMI/qca61x4.h qca61x4_bin
+	@cd ${ATH_TOPDIR}/build/tools && ./bin2hex.sh ${WLAN_DRIVER_TOPDIR}/firmware/WLAN-firmware/utf.bin ${WLAN_DRIVER_TOPDIR}/qcacld-new/CORE/SERVICES/BMI/utf.h utf_bin
+	@cd ${ATH_TOPDIR}/build/tools && ./bin2hex.sh ${WLAN_DRIVER_TOPDIR}/qcacld-new/firmware_bin/WCNSS_cfg.dat ${WLAN_DRIVER_TOPDIR}/qcacld-new/CORE/SERVICES/BMI/cfg.h cfg_bin
+	@cd ${ATH_TOPDIR}/build/tools && ./bin2hex.sh ${WLAN_DRIVER_TOPDIR}/qcacld-new/firmware_bin/WCNSS_qcom_cfg.usb.ini ${WLAN_DRIVER_TOPDIR}/qcacld-new/CORE/SERVICES/BMI/qcom_cfg.h qcon_cfg_bin
+	@cd ${ATH_TOPDIR}/build/tools && ./bin2hex.sh ${WLAN_DRIVER_TOPDIR}/qcacld-new/firmware_bin/WCNSS_qcom_wlan_nv.bin ${WLAN_DRIVER_TOPDIR}/qcacld-new/CORE/SERVICES/BMI/qcom_wlan_nv.h qcom_wlan_nv_bin
+
+
+custom_patch: common_patch
+	@echo Start Custom Patch
+ifeq ($(ENG_PATCH),1)
+	@echo Enable Internal Bluetooth backports
+	@cd ${WLAN_DRIVER_TOPDIR}/backports && patch -s -p1 < ${WLAN_DRIVER_TOPDIR}/patches/x86/bt_backports-3.12.8-1.patch
+endif
+	@cp $(WLAN_DRIVER_TOPDIR)/backports/backports_bt_enabled.config  ${WLAN_DRIVER_TOPDIR}/backports/.config
+	@cd ${WPA_SUPPLICANT_TOPDIR}/.. && patch -s -p0 < ${PATCHES_PATH}/cus12-9-003-wpa_supplicant_support_vendor_cmd.patch 
+	@echo End of Custom Patch
+
+
+bluez_patch: bluez_backports_patch
+#bluez_patch: bluez_backports_patch bluez_app_patch
+
+
+bluez_backports_patch:
+ifeq ($(ENG_PATCH),0)
+	@echo Start BlueZ Backports Patch
+	$(call patch_backports_bluetooth)
+	@echo End of BlueZ Backports Patch
+endif
+
+
+bluez_app_patch:
+	@echo Start BlueZ App Patch
+	$(call patch_bluez_application)
+	@echo End of BlueZ App Patch
+
+drivers_patch:
+	@echo Patch backports
+	@cd ${WLAN_DRIVER_TOPDIR} && patch -s -p0 < patches/001-cfg80211-backports-3.12.8-1.patch
+	@echo BOARD_TYPE_AIO_PATCH_CAF=$(BOARD_TYPE_AIO_PATCH_CAF)
+ifneq ($(strip $(BOARD_TYPE_AIO_PATCH_CAF)),)
+	@cd ${WLAN_DRIVER_TOPDIR}/backports && patch -s -p1 < ${WLAN_DRIVER_TOPDIR}/patches/x86/bt_backports-3.12.8-1.patch
+	@echo Enable Bluetooth backports
+	@cp $(WLAN_DRIVER_TOPDIR)/backports/backports_bt_enabled.config  ${WLAN_DRIVER_TOPDIR}/backports/.config
+endif
+
+	@echo Patch wpa_supplicant_8
+	@cd ${WLAN_DRIVER_TOPDIR}/../apps/ && patch -s -p0 < ${WLAN_DRIVER_TOPDIR}/patches/002-wpa_supplicant-for-aio.patch
+	@cd ${WPA_SUPPLICANT_TOPDIR} && cp wpa_supplicant/android.config wpa_supplicant/.config
+	@cd ${WPA_SUPPLICANT_TOPDIR} && cp hostapd/android.config hostapd/.config
+
+drivers_patch_R:
+	@echo Revert drivers patch
+	@echo Patch backports
+ifneq ($(strip $(BOARD_TYPE_AIO_PATCH_CAF)),)
+	@cd ${WLAN_DRIVER_TOPDIR}/backports && patch -R -p1 < ${WLAN_DRIVER_TOPDIR}/patches/${BOARD_TYPE}/bt_backports-3.12.8-1.patch
+endif
+	@cd ${WLAN_DRIVER_TOPDIR} && patch -R -p0 < patches/001-cfg80211-backports-3.12.8-1.patch
+	@echo Revert wpa_supplicant_8 patch
+	@cd ${WLAN_DRIVER_TOPDIR}/../apps/ && patch -s -p0 < ${WLAN_DRIVER_TOPDIR}/patches/002-wpa_supplicant-for-aio.patch
+	@cd ${WPA_SUPPLICANT_TOPDIR} && rm wpa_supplicant/.config
+	@cd ${WPA_SUPPLICANT_TOPDIR} && rm hostapd/.config
+
+#################################################################################################################################
+#
+# Sigma-DUT package
+#
+sigmadut_build: rootfs_prep sigmadut_clean
+	@echo Build Sigma-DUT
+	cd $(SIGMADUT_TOPDIR) && \
+	${MAKEARCH} && \
+	cp $(SIGMADUT_TOPDIR)/sigma_dut $(INSTALL_ROOT)/sbin
+
+sigmadut_clean:
+	@echo Clean Sigma-DUT
+	cd $(SIGMADUT_TOPDIR) && \
+	${MAKEARCH} clean
+
+#################################################################################################################################
+#
+# athdiag
+#
+athdiag_build: rootfs_prep athdiag_clean
+	@echo Build athdiag tool
+	cd $(ATHDIAG_TOPDIR) && \
+	${MAKEARCH} && \
+	cp $(ATHDIAG_TOPDIR)/athdiag $(INSTALL_ROOT)/sbin
+
+athdiag_clean:
+	@echo Clean athdiag tool
+	cd $(ATHDIAG_TOPDIR) && \
+	${MAKEARCH} clean
+
+#
+# SPE_BE_TEST package
+#
+spe_package:
+	@echo Build SPE_BE_TEST
+	cd ${BE_TEST_TOPDIR} && \
+	./gen_spe_package.sh
+
+#
+# BlueZ
+# 
+bluez_prepare:
+	$(call bluez_prepare_start)
+
+bluez: bluez_clean
+	@echo Build BlueZ
+	cd ${BLUEZ_TOPDIR} && \
+	sudo ${MAKEARCH}
+
+bluez_clean:
+	@echo Clean BlueZ
+	cd ${BLUEZ_TOPDIR} && \
+	sudo ${MAKEARCH} clean

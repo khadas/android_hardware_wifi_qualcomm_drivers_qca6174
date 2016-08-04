@@ -1,0 +1,32 @@
+diff -urN qcacld-new.old/CORE/SERVICES/WMA/wma.c qcacld-new/CORE/SERVICES/WMA/wma.c
+--- qcacld-new.old/CORE/SERVICES/WMA/wma.c	2016-01-14 19:28:21.945235276 +0800
++++ qcacld-new/CORE/SERVICES/WMA/wma.c	2016-01-14 19:28:21.945235276 +0800
+@@ -17422,11 +17422,13 @@ static VOS_STATUS wma_suspend_req(tp_wma_handle wma, tpSirWlanSuspendParam info)
+ 						wma->wow.gtk_pdev_enable);
+ 	}
+ 
++#ifndef QRF_WAKE_PULSE
+ 	if (!connected && !pno_in_progress) {
+ 		WMA_LOGD("All vdev are in disconnected state, skipping wow");
+ 		vos_mem_free(info);
+ 		goto send_ready_to_suspend;
+ 	}
++#endif
+ 
+ enable_wow:
+ 	WMA_LOGD("WOW Suspend");
+diff -urN qcald-new.old/Kbuild qcacld-new/Kbuild
+--- qcacld-new.old/Kbuild	2016-01-14 19:28:21.945235276 +0800
++++ qcacld-new/Kbuild	2016-01-14 19:28:21.945235276 +0800
+@@ -1470,6 +1469,11 @@ ifeq ($(CONFIG_LINUX_QCMBR),y)
+ CDEFINES += -DLINUX_QCMBR
+ endif
+ 
++# Enable feature support for QRF wake pulse
++ifeq ($(CONFIG_QRF_WAKE_PULSE),y)
++CDEFINES += -DQRF_WAKE_PULSE
++endif
++
+ # Enable feature Software AP Authentication Offload
+ ifeq ($(SAP_AUTH_OFFLOAD),1)
+ CDEFINES += -DSAP_AUTH_OFFLOAD

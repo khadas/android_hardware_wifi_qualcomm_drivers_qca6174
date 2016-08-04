@@ -1,0 +1,11 @@
+--- backports-3.18.1-1.orig/kconf/Makefile	2014-12-22 05:37:13.000000000 +0800
++++ backports-3.18.1-1/kconf/Makefile	2016-07-07 14:19:02.757443552 +0800
+@@ -3,7 +3,7 @@
+ LXDIALOG := lxdialog/checklist.o lxdialog/inputbox.o lxdialog/menubox.o lxdialog/textbox.o lxdialog/util.o lxdialog/yesno.o
+ 
+ conf: conf.o zconf.tab.o
+-mconf: LDFLAGS = -Wl,--add-needed $(shell ./lxdialog/check-lxdialog.sh -ldflags $(CC))
++mconf: LDFLAGS = -Wl,--no-as-needed $(shell ./lxdialog/check-lxdialog.sh -ldflags $(CC))
+ mconf: CFLAGS += -DCURSES_LOC="<ncurses.h>" -DLOCALE
+ mconf: mconf.o zconf.tab.o $(LXDIALOG)
+ 

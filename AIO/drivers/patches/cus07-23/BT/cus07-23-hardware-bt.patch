@@ -1,0 +1,1484 @@
+diff -Naur '--exclude=.git' bt-orig/libbt-vendor/bt-vendor_qca.pc.in bt/libbt-vendor/bt-vendor_qca.pc.in
+--- bt-orig/libbt-vendor/bt-vendor_qca.pc.in	1970-01-01 08:00:00.000000000 +0800
++++ bt/libbt-vendor/bt-vendor_qca.pc.in	2016-05-05 13:23:44.877763853 +0800
+@@ -0,0 +1,11 @@
++prefix=@PREFIX@
++exec_prefix=@EXEC_PREFIX@
++libdir=@LIB_INSTALL_DIR@
++includedir=@INCLUDEDIR@
++
++Name: bt-vendor_qca
++Description: Qualcomm Vendor Bluetooth library
++Version: @VERSION@
++Requires: dlog
++Libs: -L${libdir} 
++Cflags: -I${includedir}
+diff -Naur '--exclude=.git' bt-orig/libbt-vendor/CMakeLists.txt bt/libbt-vendor/CMakeLists.txt
+--- bt-orig/libbt-vendor/CMakeLists.txt	1970-01-01 08:00:00.000000000 +0800
++++ bt/libbt-vendor/CMakeLists.txt	2016-05-05 13:23:44.877763853 +0800
+@@ -0,0 +1,62 @@
++CMAKE_MINIMUM_REQUIRED(VERSION 2.6)
++PROJECT(bt-vendor_qca C)
++
++ADD_DEFINITIONS("-DHAS_NO_BDROID_BUILDCFG -DX86_BUILD")
++
++SET(SRCS
++./src/bt_vendor_qcom.c
++./src/hardware.c
++./src/hci_uart.c
++./src/hci_smd.c
++./src/hw_rome.c
++./src/hw_ar3k.c
++./src/qcom_etc.c
++)
++
++SET(PREFIX ${CMAKE_INSTALL_PREFIX})
++SET(EXEC_PREFIX "\${prefix}")
++SET(LIBDIR "\${prefix}/lib")
++SET(INCLUDEDIR "\${prefix}/include")
++SET(VERSION_MAJOR 1)
++SET(VERSION ${VERSION_MAJOR}.0.0)
++
++
++set(LOCAL_C_INCLUDES 
++	./include 
++	../../../../system/core/include
++	../../../../external/bluetooth/bluedroid/hci/include
++	../../../../hardware/libhardware/include
++	../../../../bionic/libc/include
++	../../../../bionic/libc/kernel/common
++	)
++include_directories(${LOCAL_C_INCLUDES})
++
++LINK_DIRECTORIES(../../../../lib)
++
++FOREACH(flag ${packages_CFLAGS})
++	SET(EXTRA_CFLAGS "${EXTRA_CFLAGS} ${flag}")
++ENDFOREACH(flag)
++
++#SET(EXTRA_CFLAGS "${EXTRA_CFLAGS} -fvisibility=hidden -Wall")
++SET(EXTRA_CFLAGS "${EXTRA_CFLAGS} -g ")
++
++SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${EXTRA_CFLAGS}")
++
++FIND_PROGRAM(UNAME NAMES uname)
++EXEC_PROGRAM("${UNAME}" ARGS "-m" OUTPUT_VARIABLE "ARCH")
++IF("${ARCH}" STREQUAL "arm")
++	ADD_DEFINITIONS("-DTARGET")
++	MESSAGE("add -DTARGET")
++ENDIF("${ARCH}" STREQUAL "arm")
++
++ADD_LIBRARY(${PROJECT_NAME} SHARED ${SRCS})
++SET_TARGET_PROPERTIES(${PROJECT_NAME} PROPERTIES SOVERSION ${VERSION_MAJOR})
++SET_TARGET_PROPERTIES(${PROJECT_NAME} PROPERTIES VERSION ${VERSION})
++TARGET_LINK_LIBRARIES(${PROJECT_NAME} -ldlog)
++TARGET_LINK_LIBRARIES(${PROJECT_NAME} -lpthread)
++TARGET_LINK_LIBRARIES(${PROJECT_NAME} -ldl)
++TARGET_LINK_LIBRARIES(${PROJECT_NAME} -lrt)
++
++CONFIGURE_FILE(${CMAKE_CURRENT_SOURCE_DIR}/${PROJECT_NAME}.pc.in ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}.pc @ONLY)
++INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}.pc DESTINATION lib/pkgconfig)
++INSTALL(TARGETS ${PROJECT_NAME} DESTINATION lib COMPONENT RuntimeLibraries)
+diff -Naur '--exclude=.git' bt-orig/libbt-vendor/include/bt_vendor_persist.h bt/libbt-vendor/include/bt_vendor_persist.h
+--- bt-orig/libbt-vendor/include/bt_vendor_persist.h	2016-05-05 13:21:27.841761345 +0800
++++ bt/libbt-vendor/include/bt_vendor_persist.h	2016-05-05 13:23:44.877763853 +0800
+@@ -24,6 +24,8 @@
+  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+  */
+ 
++ /*Gerbera - BT*/
++
+ #ifndef BT_VENDOR_PERSIST_H_
+ #define BT_VENDOR_PERSIST_H_
+ 
+@@ -37,6 +39,7 @@
+ #ifdef BT_NV_SUPPORT
+ 
+ #endif /* BT_NV_SUPPORT */
++typedef unsigned char uint8_t;
+ typedef unsigned char boolean;
+ /*===========================================================================
+ FUNCTION   bt_vendor_nv_read
+diff -Naur '--exclude=.git' bt-orig/libbt-vendor/include/bt_vendor_qcom.h bt/libbt-vendor/include/bt_vendor_qcom.h
+--- bt-orig/libbt-vendor/include/bt_vendor_qcom.h	2016-05-05 13:21:27.841761345 +0800
++++ bt/libbt-vendor/include/bt_vendor_qcom.h	2016-05-05 13:23:44.877763853 +0800
+@@ -1,4 +1,9 @@
+ /*
++ *  Copyright (c) 2015 Qualcomm Atheros, Inc.
++ *  All Rights Reserved.
++ *  Qualcomm Atheros Confidential and Proprietary.
++ *  NOT A CONTRIBUTION
++ *
+  * Copyright 2012 The Android Open Source Project
+  *
+  * Licensed under the Apache License, Version 2.0 (the "License");
+@@ -14,11 +19,13 @@
+  * limitations under the License.
+  */
+ 
++ /*Gerbera - BT*/
++
+ #ifndef BT_VENDOR_QCOM_H
+ #define BT_VENDOR_QCOM_H
+ 
+ #include "bt_vendor_lib.h"
+-#include "vnd_buildcfg.h"
++//#include "vnd_buildcfg.h"
+ #include "utils.h"
+ 
+ #ifndef FALSE
+@@ -32,7 +39,8 @@
+ typedef enum {
+     BT_SOC_DEFAULT = 0,
+     BT_SOC_SMD = BT_SOC_DEFAULT,
+-    BT_SOC_ROME,
++    BT_SOC_ROME_USB,
++    BT_SOC_ROME_UART,
+     BT_SOC_AR3K,
+     /* Add chipset type here */
+     BT_SOC_RESERVED
+diff -Naur '--exclude=.git' bt-orig/libbt-vendor/include/hci_uart.h bt/libbt-vendor/include/hci_uart.h
+--- bt-orig/libbt-vendor/include/hci_uart.h	2016-05-05 13:21:27.841761345 +0800
++++ bt/libbt-vendor/include/hci_uart.h	2016-05-05 13:23:44.877763853 +0800
+@@ -1,4 +1,9 @@
+ /*
++ *  Copyright (c) 2015 Qualcomm Atheros, Inc.
++ *  All Rights Reserved.
++ *  Qualcomm Atheros Confidential and Proprietary.
++ *  NOT A CONTRIBUTION
++ *
+  *  Copyright (c) 2013, The Linux Foundation. All rights reserved.
+  *  Not a Contribution.
+  *  Copyright (C) 2009-2012 Broadcom Corporation
+@@ -16,12 +21,14 @@
+  *  limitations under the License.
+  */
+ 
++ /*Gerbera - BT*/
++
+ #ifndef HCI_UART_H
+ #define HCI_UART_H
+ 
+ /* Variables to identify the platform */
+ /*BT HS UART TTY DEVICE */
+-#define BT_HS_UART_DEVICE "/dev/ttyHS0"
++#define BT_HS_UART_DEVICE "/dev/ttyUSB0"
+ 
+ /**** baud rates ****/
+ #define USERIAL_BAUD_300        0
+@@ -69,6 +76,8 @@
+ /* HCI Command/Event Opcode */
+ #define HCI_RESET                       0x0C03
+ #define EVT_CMD_COMPLETE       0x0E
++#define HCI_READ_BD_ADDR         0x1009
++#define HCIC_PARAM_SIZE_READ_CMD 0
+ 
+ /* Command opcode pack/unpack */
+ #define cmd_opcode_pack(ogf, ocf)   (uint16_t)((ocf & 0x03ff)|(ogf << 10))
+@@ -132,6 +141,7 @@
+ typedef struct
+ {
+     int fd;                     /* fd to Bluetooth device */
++    int fd_lite;                /* fd to Bluetooth Lite */
+     struct termios termios;     /* serial terminal of BT port */
+     char port_name[VND_PORT_NAME_MAXLEN];
+ } vnd_userial_cb_t;
+diff -Naur '--exclude=.git' bt-orig/libbt-vendor/include/hw_rome.h bt/libbt-vendor/include/hw_rome.h
+--- bt-orig/libbt-vendor/include/hw_rome.h	2016-05-05 13:21:27.841761345 +0800
++++ bt/libbt-vendor/include/hw_rome.h	2016-05-05 13:23:44.877763853 +0800
+@@ -1,4 +1,9 @@
+ /*
++ *  Copyright (c) 2015 Qualcomm Atheros, Inc.
++ *  All Rights Reserved.
++ *  Qualcomm Atheros Confidential and Proprietary.
++ *  NOT A CONTRIBUTION
++ *
+  * Copyright 2012 The Android Open Source Project
+  * Copyright (c) 2013, The Linux Foundation. All rights reserved.
+  * Not a Contribution.
+@@ -15,6 +20,9 @@
+  *  See the License for the specific language governing permissions and
+  *  limitations under the License.
+  */
++
++ /*Gerbera - BT*/
++
+ #ifndef HW_ROME_H
+ #define HW_ROME_H
+ 
+@@ -76,7 +84,7 @@
+ /* VS Opcode */
+ #define HCI_PATCH_CMD_OCF                       (0)
+ #define EDL_SET_BAUDRATE_CMD_OCF        (0x48)
+-
++#define HCI_VS_WR_BT_ADDR               (0x14)
+ /* VS Commands */
+ #define VSC_SET_BAUDRATE_REQ_LEN        (1)
+ #define EDL_PATCH_CMD_LEN	                       (1)
+@@ -137,8 +145,13 @@
+ #define ROME_NVM_TLV_PATH         "/system/etc/firmware/nvm_tlv.bin"
+ #define ROME_RAMPATCH_TLV_1_0_3_PATH    "/system/etc/firmware/rampatch_tlv_1.3.tlv"
+ #define ROME_NVM_TLV_1_0_3_PATH         "/system/etc/firmware/nvm_tlv_1.3.bin"
++#ifndef X86_BUILD
+ #define ROME_RAMPATCH_TLV_2_0_1_PATH    "/system/etc/firmware/rampatch_tlv_2.1.tlv"
+ #define ROME_NVM_TLV_2_0_1_PATH         "/system/etc/firmware/nvm_tlv_2.1.bin"
++#else
++#define ROME_RAMPATCH_TLV_2_0_1_PATH    "/lib/firmware/rampatch_tlv_2.1.tlv"
++#define ROME_NVM_TLV_2_0_1_PATH         "/lib/firmware/nvm_tlv_2.1.bin"
++#endif
+ #define ROME_RAMPATCH_TLV_3_0_0_PATH    "/system/etc/firmware/rampatch_tlv_3.0.tlv"
+ #define ROME_NVM_TLV_3_0_0_PATH         "/system/etc/firmware/nvm_tlv_3.0.bin"
+ 
+diff -Naur '--exclude=.git' bt-orig/libbt-vendor/include/termios.h bt/libbt-vendor/include/termios.h
+--- bt-orig/libbt-vendor/include/termios.h	1970-01-01 08:00:00.000000000 +0800
++++ bt/libbt-vendor/include/termios.h	2016-05-05 13:23:44.877763853 +0800
+@@ -0,0 +1,3 @@
++#include <linux/termios.h>
++#include <errno.h>
++#include <stdbool.h>
+diff -Naur '--exclude=.git' bt-orig/libbt-vendor/src/bt_vendor_qcom.c bt/libbt-vendor/src/bt_vendor_qcom.c
+--- bt-orig/libbt-vendor/src/bt_vendor_qcom.c	2016-05-05 13:21:27.841761345 +0800
++++ bt/libbt-vendor/src/bt_vendor_qcom.c	2016-05-05 13:23:44.877763853 +0800
+@@ -1,4 +1,9 @@
+ /*
++ *  Copyright (c) 2015 Qualcomm Atheros, Inc.
++ *  All Rights Reserved.
++ *  Qualcomm Atheros Confidential and Proprietary.
++ *  NOT A CONTRIBUTION
++ *
+  * Copyright 2012 The Android Open Source Project
+  * Copyright (c) 2013, The Linux Foundation. All rights reserved.
+  * Not a Contribution.
+@@ -16,6 +21,8 @@
+  * limitations under the License.
+  */
+ 
++ /*Gerbera - BT*/
++
+ /******************************************************************************
+  *
+  *  Filename:      bt_vendor_qcom.c
+@@ -37,7 +44,8 @@
+ #include <cutils/sockets.h>
+ #include <linux/un.h>
+ #include "bt_vendor_persist.h"
+-
++#include <stdint.h>
++#include <string.h>
+ #define WAIT_TIMEOUT 200000
+ 
+ /******************************************************************************
+@@ -51,12 +59,16 @@
+ **  Variables
+ ******************************************************************************/
+ int pFd[2] = {0,};
++#ifdef BT_SOC_TYPE_ROME
+ int ant_fd;
++#endif
+ bt_vendor_callbacks_t *bt_vendor_cbacks = NULL;
+ uint8_t vnd_local_bd_addr[6]={0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+ static int btSocType = BT_SOC_DEFAULT;
+-static int rfkill_id = -1;
++#ifdef PLATFORM_ANDROID
+ static char *rfkill_state = NULL;
++static int rfkill_id = -1;
++#endif
+ bool enable_extldo = FALSE;
+ 
+ static const tUSERIAL_CFG userial_init_cfg =
+@@ -85,6 +97,10 @@
+ #endif /* WIFI_BT_STATUS_SYNC */
+ bool is_soc_initialized(void);
+ 
++int ath3k_init(int fd, int speed, int init_speed, char *bdaddr, struct termios *ti);
++int update_local_bd_addr(int fd, char *bdaddr);
++int close(int);
++void lpm_set_ar3k(uint8_t pio, uint8_t action, uint8_t polarity);
+ /******************************************************************************
+ **  Local type definitions
+ ******************************************************************************/
+@@ -171,6 +187,7 @@
+ #endif /* WIFI_BT_STATUS_SYNC */
+ 
+ /** Get Bluetooth SoC type from system setting */
++#ifdef PLATFORM_ANDROID
+ static int get_bt_soc_type()
+ {
+     int ret = 0;
+@@ -178,6 +195,11 @@
+ 
+     ALOGI("bt-vendor : get_bt_soc_type");
+ 
++#if 0 //def X86_BUILD
++    printf("get_bt_soc_type : returning BT_SOC_ROME\n");
++    return BT_SOC_ROME;
++
++	
+     ret = property_get("qcom.bluetooth.soc", bt_soc_type, NULL);
+     if (ret != 0) {
+         ALOGI("qcom.bluetooth.soc set to %s\n", bt_soc_type);
+@@ -196,10 +218,11 @@
+         ALOGE("%s: Failed to get soc type", __FUNCTION__);
+         ret = BT_SOC_DEFAULT;
+     }
++#endif
+ 
+     return ret;
+ }
+-
++#endif
+ bool can_perform_action(char action) {
+     bool can_perform = false;
+     char ref_count[PROPERTY_VALUE_MAX];
+@@ -294,6 +317,7 @@
+         ALOGV("%s: Exit ", __func__);
+ }
+ 
++#ifdef PLATFORM_ANDROID
+ /** Bluetooth Controller power up or shutdown */
+ static int bt_powerup(int en )
+ {
+@@ -455,6 +479,7 @@
+ 
+     return 0;
+ }
++#endif
+ 
+ /*****************************************************************************
+ **
+@@ -474,18 +499,25 @@
+         return -1;
+     }
+ 
++#ifdef PLATFORM_ANDROID
+     if ((btSocType = get_bt_soc_type()) < 0) {
+         ALOGE("%s: Failed to detect BT SOC Type", __FUNCTION__);
+         return -1;
+     }
++#else
++    btSocType = BT_SOC_ROME_USB;
++#endif
+ 
+     switch(btSocType)
+     {
+-        case BT_SOC_ROME:
++        case BT_SOC_ROME_UART:
+         case BT_SOC_AR3K:
+             ALOGI("bt-vendor : Initializing UART transport layer");
+             userial_vendor_init();
+             break;
++	 case BT_SOC_ROME_USB:			
++	 	ALOGI("bt-vendor : init: Initializing USB transport layer");
++		break;
+         case BT_SOC_DEFAULT:
+             break;
+         default:
+@@ -494,7 +526,7 @@
+     }
+ 
+     /* store reference to user callbacks */
+-    bt_vendor_cbacks = (bt_vendor_callbacks_t *) p_cb;
++    bt_vendor_cbacks = (bt_vendor_callbacks_t *)(uintptr_t) p_cb;
+ 
+     /* Copy BD Address as little-endian byte order */
+     if(local_bdaddr)
+@@ -517,7 +549,7 @@
+ }
+ 
+ 
+-
++#ifndef X86_BUILD
+ int connect_to_local_socket(char* name) {
+        socklen_t len; int sk = -1;
+ 
+@@ -539,6 +571,7 @@
+         }
+         return sk;
+ }
++#endif
+ 
+ bool is_soc_initialized() {
+     bool init = false;
+@@ -566,9 +599,10 @@
+ static int op(bt_vendor_opcode_t opcode, void *param)
+ {
+     int retval = 0;
+-    int nCnt = 0;
+     int nState = -1;
++#ifdef PLATFORM_ANDROID
+     bool is_ant_req = false;
++#endif
+ 
+     ALOGV("bt-vendor : op for %d", opcode);
+ 
+@@ -593,10 +627,20 @@
+                             retval = -1;
+                         }
+                         break;
+-                    case BT_SOC_ROME:
++                    case BT_SOC_ROME_UART:
+                     case BT_SOC_AR3K:
+                         /* BT Chipset Power Control through Device Tree Node */
++#ifndef X86_BUILD						
+                         retval = bt_powerup(nState);
++#else
++                        retval = 0;
++#endif
++		      case BT_SOC_ROME_USB:
++                        if(nState == BT_VND_PWR_OFF) {
++                            ALOGI("##### bt-vendor : BT_VND_OP_POWER_CTRL (OFF): Powering OFF ROME-USB #####");
++                        } else
++                            ALOGI("##### bt-vendor : BT_VND_OP_POWER_CTRL (ON) : Powering ON  ROME-USB... #####");
++                        break;			  	
+                     default:
+                         break;
+                 }
+@@ -618,14 +662,18 @@
+ 
+         case BT_VND_OP_SCO_CFG:
+             {
+-                bt_vendor_cbacks->scocfg_cb(BT_VND_OP_RESULT_SUCCESS); //dummy
++                if (bt_vendor_cbacks)
++                    bt_vendor_cbacks->scocfg_cb(BT_VND_OP_RESULT_SUCCESS); //dummy            
+             }
+             break;
+ 
++#ifdef PLATFORM_ANDROID
+         case BT_VND_OP_ANT_USERIAL_OPEN:
+                 ALOGI("bt-vendor : BT_VND_OP_ANT_USERIAL_OPEN");
+                 is_ant_req = true;
+                 //fall through
++#endif
++
+         case BT_VND_OP_USERIAL_OPEN:
+             {
+                 int (*fd_array)[] = (int (*)[]) param;
+@@ -650,9 +698,10 @@
+                             retval = 2;
+                         }
+                         break;
++#ifdef PLATFORM_ANDROID
+                     case BT_SOC_AR3K:
+                         {
+-                            fd = userial_vendor_open((tUSERIAL_CFG *) &userial_init_cfg);
++                            fd = userial_vendor_open((tUSERIAL_CFG *)(uintptr_t) &userial_init_cfg);
+                             if (fd != -1) {
+                                 for (idx=0; idx < CH_MAX; idx++)
+                                     (*fd_array)[idx] = fd;
+@@ -671,14 +720,53 @@
+                                 retval = -1;
+                         }
+                         break;
+-                    case BT_SOC_ROME:
++#endif                        
++                    case BT_SOC_ROME_USB:
+                         {
++                            int local_fd[CH_MAX];
++                            int ret = 0;
++                            for (idx = 0; idx < CH_MAX; idx++)
++                                 local_fd[idx] = -1;
++                            ALOGI("bt-vendor : SOC type is ROME-USB");
++                            strlcpy(vnd_userial.port_name, "/dev/btusb0", sizeof(vnd_userial.port_name));
++                            ALOGI("userial vendor open: opening %s", vnd_userial.port_name);
++
++                            if ((vnd_userial.fd = open("/dev/btusb0", O_RDWR)) == -1) {
++                                ALOGE("bt-vendor : Failed to open the SS USB Character driver");
++                                return -1;
++                            } else
++                                ALOGI("bt-vendor : Succesfully opened handle to SS USB Driver. vnd_userial.fd = %d", vnd_userial.fd);
++                            fd = vnd_userial.fd;
++                            local_fd[0] = fd;
++                            if ((vnd_userial.fd_lite = open("/proc/driver/btusb/btusb0/lite", O_RDWR)) == -1) {
++                                ALOGE("bt-vendor : Failed to open SS USB LITE driver ");
++                            }
++                            else
++                                ALOGI("bt-vendor : Successfully opened handle for SS USB LITE Driver fd = %d", vnd_userial.fd_lite);
++                            local_fd[1] = vnd_userial.fd_lite;
++                            ret = update_local_bd_addr(fd,vnd_local_bd_addr);
++                            if (ret > 0)
++                                ALOGI("bt-vendo: BD ADDR updated successfully");
++                            if (fd != -1) {
++                                for (idx=0; idx < CH_MAX; idx++)
++                                    (*fd_array)[idx] = local_fd[idx];
++                                retval = 1;
++                            }
++                        }
++                        break;
++                    case BT_SOC_ROME_UART:
++#ifdef PLATFORM_ANDROID
++                        {
++#ifndef X86_BUIL
+                             if (!is_soc_initialized()) {
++#endif								
+                                 fd = userial_vendor_open((tUSERIAL_CFG *) &userial_init_cfg);
+                                 if (fd < 0) {
+                                     ALOGE("userial_vendor_open returns err");
+                                     retval = -1;
+-                                } else {
++                                } 
++#ifndef X86_BUILD								
++				    else {
+                                     ALOGV("rome_soc_init is started");
+                                     property_set("wc_transport.soc_initialized", "0");
+                                     /* Always read BD address from NV file */
+@@ -687,14 +775,22 @@
+                                        /* Since the BD address is configured in boot time We should not be here */
+                                        ALOGI("Failed to read BD address. Use the one from bluedroid stack/ftm");
+                                     }
++#endif									
+                                     if(rome_soc_init(fd,vnd_local_bd_addr)<0) {
+                                         retval = -1;
+                                     } else {
+                                         ALOGV("rome_soc_init is completed");
++#ifndef X86_BUILD										
+                                         property_set("wc_transport.soc_initialized", "1");
+                                         /*Close the UART port*/
+                                         close(fd);
++#endif
++					     for (idx=0; idx < CH_MAX; idx++) {
++                                              (*fd_array)[idx] = fd;
++					     }
++                                        retval = 1;
+                                     }
++#ifndef X86_BUILD									
+                                 }
+                             }
+ 
+@@ -720,8 +816,10 @@
+                                      retval = -1;
+                                  }
+                              }
++#endif							
+                         }
+                         break;
++#endif
+                     default:
+                         ALOGE("Unknown btSocType: 0x%x", btSocType);
+                         break;
+@@ -729,6 +827,7 @@
+             }
+             break;
+ 
++#ifdef PLATFORM_ANDROID
+         case BT_VND_OP_ANT_USERIAL_CLOSE:
+             {
+                 ALOGI("bt-vendor : BT_VND_OP_ANT_USERIAL_CLOSE");
+@@ -740,6 +839,7 @@
+                 }
+             }
+             break;
++#endif			
+         case BT_VND_OP_USERIAL_CLOSE:
+             {
+                 ALOGI("bt-vendor : BT_VND_OP_USERIAL_CLOSE btSocType: %d", btSocType);
+@@ -749,11 +849,27 @@
+                          bt_hci_deinit_transport(pFd);
+                          break;
+ 
+-                     case BT_SOC_ROME:
++                     case BT_SOC_ROME_UART:
+                      case BT_SOC_AR3K:
+                         property_set("wc_transport.clean_up","1");
+                         userial_vendor_close();
+                         break;
++                    case BT_SOC_ROME_USB:
++                        if (vnd_userial.fd == -1)
++                            ALOGE("%s: FD is already released", __func__);
++                        else {
++                            ALOGE("%s: Releasing the file handle to the BT USB driver", __func__);
++                            close(vnd_userial.fd);
++                            vnd_userial.fd = -1;
++                        }
++                        if (vnd_userial.fd_lite == -1)
++                            ALOGE("%s: FD Lite is already released", __func__);
++                        else {
++                            ALOGE("%s: Releasing the file handle: %d to the BT LITE driver", __func__, vnd_userial.fd_lite);
++                            close(vnd_userial.fd_lite);
++                            vnd_userial.fd_lite = -1;
++                        }
++                        break;
+                     default:
+                         ALOGE("Unknown btSocType: 0x%x", btSocType);
+                         break;
+@@ -779,10 +895,12 @@
+                     lpm_set_ar3k(UPIO_LPM_MODE, UPIO_DEASSERT, 0);
+                 }
+ 
+-                bt_vendor_cbacks->lpm_cb(BT_VND_OP_RESULT_SUCCESS);
++  		  if (bt_vendor_cbacks)
++		  	bt_vendor_cbacks->lpm_cb(BT_VND_OP_RESULT_SUCCESS);
+             }
+             else {
+-                bt_vendor_cbacks->lpm_cb(BT_VND_OP_RESULT_SUCCESS); //dummy
++ 		  if (bt_vendor_cbacks)
++                	bt_vendor_cbacks->lpm_cb(BT_VND_OP_RESULT_SUCCESS); //dummy
+             }
+             break;
+ 
+@@ -790,7 +908,8 @@
+             {
+                 switch(btSocType)
+                 {
+-                    case BT_SOC_ROME:
++                    case BT_SOC_ROME_UART:
++#ifdef PLATFORM_ANDROID						
+                         {
+                             uint8_t *state = (uint8_t *) param;
+                             uint8_t wake_assert = (*state == BT_VND_LPM_WAKE_ASSERT) ? \
+@@ -809,6 +928,10 @@
+ #endif
+                         }
+                         break;
++#endif						
++                    case BT_SOC_ROME_USB:
++                        ALOGI("bt-vendor : BT_VND_OP_LPM_WAKE_SET_STATE: ROME-USB already awake");
++                        break;
+                     case BT_SOC_AR3K:
+                         {
+                             uint8_t *state = (uint8_t *) param;
+@@ -816,7 +939,10 @@
+                                                         UPIO_ASSERT : UPIO_DEASSERT;
+                             lpm_set_ar3k(UPIO_BT_WAKE, wake_assert, 0);
+                         }
++                        //PREVENT CID138354
++                        break;
+                     case BT_SOC_DEFAULT:
++ 			   ALOGE("btSocType: (default) 0x%x", btSocType);
+                         break;
+                     default:
+                         ALOGE("Unknown btSocType: 0x%x", btSocType);
+@@ -826,35 +952,28 @@
+             break;
+         case BT_VND_OP_EPILOG:
+             {
++	     ALOGE("Recvd. BT_VND_OP_EPILOG command");
+ #if (HW_NEED_END_WITH_HCI_RESET == FALSE)
+                 if (bt_vendor_cbacks)
+                 {
+                     bt_vendor_cbacks->epilog_cb(BT_VND_OP_RESULT_SUCCESS);
+                 }
++                    case BT_SOC_ROME_USB:
++                        ALOGI("bt-vendor : BT_VND_OP_LPM_WAKE_SET_STATE: ROME-USB already awake");
++                        break;+            ALOGE("BT_VND_OP_EPILOG: HW does not need to end with HCI RESET");
++            if (bt_vendor_cbacks)
++            {
++                bt_vendor_cbacks->epilog_cb(BT_VND_OP_RESULT_SUCCESS);
++            }				
+ #else
+                 hw_epilog_process();
++            ALOGE("BT_VND_OP_EPILOG: HW Needs to end with HCI RESET");
++            hw_epilog_process();
+ #endif
+             }
+             break;
+-        case BT_VND_OP_GET_LINESPEED:
+-            {
+-                retval = -1;
+-                switch(btSocType)
+-                {
+-                    case BT_SOC_ROME:
+-                        if(!is_soc_initialized()) {
+-                            ALOGE("BT_VND_OP_GET_LINESPEED: error"
+-                            " - transport driver not initialized!");
+-                        } else {
+-                            retval = 3000000;
+-                        }
+-                        break;
+-                    default:
+-                        retval = userial_vendor_get_baud();
+-                        break;
+-                 }
+-                break;
+-            }
++         default:
++           ALOGE("Unknown opcode");
+     }
+ 
+     return retval;
+@@ -865,15 +984,20 @@
+ 
+     ALOGI("ssr_cleanup");
+ 
++#ifdef PLATFORM_ANDROID
+     if ((btSocType = get_bt_soc_type()) < 0) {
+         ALOGE("%s: Failed to detect BT SOC Type", __FUNCTION__);
+         return -1;
+     }
++#else
++    btSocType = BT_SOC_ROME_USB;
++#endif
+ 
+-    if (btSocType == BT_SOC_ROME) {
+-
++    if (btSocType == BT_SOC_ROME_UART) {
++#ifdef BT_SOC_TYPE_ROME
+         /*Close both ANT and BT channels*/
+         op(BT_VND_OP_ANT_USERIAL_CLOSE, NULL);
++#endif
+         op(BT_VND_OP_USERIAL_CLOSE, NULL);
+         /*CTRL OFF twice to make sure hw
+          * turns off*/
+@@ -881,8 +1005,10 @@
+ 
+     }
+ 
++#ifdef BT_SOC_TYPE_ROME
+     /*Generally switching of chip should be enough*/
+     op(BT_VND_OP_POWER_CTRL, &pwr_state);
++#endif
+ 
+     bt_vendor_cbacks = NULL;
+ }
+diff -Naur '--exclude=.git' bt-orig/libbt-vendor/src/hardware.c bt/libbt-vendor/src/hardware.c
+--- bt-orig/libbt-vendor/src/hardware.c	2016-05-05 13:21:27.841761345 +0800
++++ bt/libbt-vendor/src/hardware.c	2016-05-05 13:23:44.877763853 +0800
+@@ -14,6 +14,8 @@
+  * limitations under the License.
+  */
+ 
++ /*Gerbera - BT*/
++
+ /******************************************************************************
+  *
+  *  Filename:      hardware.c
+@@ -41,12 +43,12 @@
+ #include "bt_vendor_qcom.h"
+ 
+ #define MAX_CNT_RETRY 100
+-
++int usleep(unsigned int);
+ int hw_config(int nState)
+ {
+     ALOGI("Starting hciattach daemon");
+-    char *szState[] = {"true", "false"};
+-    char *szReqSt = NULL;
++    const char *szState[] = {"true", "false"};
++    const char *szReqSt = NULL;
+ 
+     if(nState == BT_VND_PWR_OFF)
+         szReqSt = szState[1];
+@@ -81,7 +83,6 @@
+ int is_hw_ready()
+ {
+     int i=0;
+-    char szStatus[10] = {0,};
+ 
+     for(i=MAX_CNT_RETRY; i>0; i--){
+        usleep(50*1000);
+@@ -108,7 +109,6 @@
+ void hw_epilog_cback(void *p_mem)
+ {
+     HC_BT_HDR *p_evt_buf = (HC_BT_HDR *) p_mem;
+-    char        *p_name, *p_tmp;
+     uint8_t     *p, status;
+     uint16_t    opcode;
+ 
+diff -Naur '--exclude=.git' bt-orig/libbt-vendor/src/hci_smd.c bt/libbt-vendor/src/hci_smd.c
+--- bt-orig/libbt-vendor/src/hci_smd.c	2016-05-05 13:21:27.841761345 +0800
++++ bt/libbt-vendor/src/hci_smd.c	2016-05-05 13:23:44.877763853 +0800
+@@ -14,6 +14,8 @@
+  * limitations under the License.
+  */
+ 
++ /*Gerbera - BT*/
++
+ /******************************************************************************
+  *
+  *  Filename:      hci_smd.c
+@@ -32,11 +34,19 @@
+ #include "bt_vendor_qcom.h"
+ #include "hci_smd.h"
+ 
++int bt_hci_init_transport(int *pFd);
++int bt_hci_init_transport_id (int chId );
++int usleep(unsigned int usec);
++int tcflush (int, int);
++int close (int);
++int tcgetattr(int, struct termios *);
++void cfmakeraw(struct termios *termios_p);
++int tcsetattr(int fd, int optional_actions, const struct termios *termios_p);
+ /*****************************************************************************
+ **   Macros & Constants
+ *****************************************************************************/
+ #define NUM_OF_DEVS 2
+-static char *s_pszDevSmd[] = {
++static const char *s_pszDevSmd[] = {
+     "/dev/smd3",
+     "/dev/smd2"
+ };
+@@ -72,7 +82,8 @@
+   char ssrvalue[92]= {'\0'};
+ 
+   ssrvalue[0] = '0';
+-  if(chId > 2 || chId <0)
++  //PREVENT CID138196
++  if(chId > 1 || chId <0)
+      return -1;
+ 
+   fd = open(s_pszDevSmd[chId], (O_RDWR | O_NOCTTY));
+diff -Naur '--exclude=.git' bt-orig/libbt-vendor/src/hci_uart.c bt/libbt-vendor/src/hci_uart.c
+--- bt-orig/libbt-vendor/src/hci_uart.c	2016-05-05 13:21:27.841761345 +0800
++++ bt/libbt-vendor/src/hci_uart.c	2016-05-05 13:23:44.877763853 +0800
+@@ -1,4 +1,9 @@
+ /*
++ *  Copyright (c) 2015 Qualcomm Atheros, Inc.
++ *  All Rights Reserved.
++ *  Qualcomm Atheros Confidential and Proprietary.
++ *  NOT A CONTRIBUTION
++ *
+  * Copyright (c) 2013, The Linux Foundation. All rights reserved.
+  * Not a Contribution.
+  * Copyright 2012 The Android Open Source Project
+@@ -16,6 +21,8 @@
+  * limitations under the License.
+  */
+ 
++ /*Gerbera - BT*/
++
+ /******************************************************************************
+  *
+  *  Filename:      userial_vendor.c
+@@ -33,7 +40,16 @@
+ #include <stdio.h>
+ #include "bt_vendor_qcom.h"
+ #include "hci_uart.h"
++#include <string.h>
+ 
++int ioctl(int, int, void *);
++int close(int fd);
++int tcflush(int fd, int queue);
++int tcgetattr(int fd, struct termios* s);
++void cfmakeraw(struct termios* s);
++int cfsetospeed(struct termios *termios_p, speed_t speed);
++int cfsetispeed(struct termios *termios_p, speed_t speed);
++int tcsetattr(int fd, int optional_actions, const struct termios *termios_p);
+ 
+ /******************************************************************************
+ **  Constants & Macros
+@@ -106,70 +122,6 @@
+     return TRUE;
+ }
+ 
+-/*******************************************************************************
+-**
+-** Function        userial_to_baud_tcio
+-**
+-** Description     helper function converts TCIO baud rate into integer
+-**
+-** Returns         uint32_t
+-**
+-*******************************************************************************/
+-int userial_tcio_baud_to_int(uint32_t baud)
+-{
+-    int baud_rate =0;
+-
+-    switch (baud)
+-    {
+-        case B600:
+-            baud_rate = 600;
+-            break;
+-        case B1200:
+-            baud_rate = 1200;
+-            break;
+-        case B9600:
+-            baud_rate = 9600;
+-            break;
+-        case B19200:
+-            baud_rate = 19200;
+-            break;
+-        case B57600:
+-            baud_rate = 57600;
+-            break;
+-        case B115200:
+-            baud_rate = 115200;
+-            break;
+-        case B230400:
+-            baud_rate = 230400;
+-            break;
+-        case B460800:
+-            baud_rate = 460800;
+-            break;
+-        case B921600:
+-            baud_rate = 921600;
+-            break;
+-        case B1000000:
+-            baud_rate = 1000000;
+-            break;
+-        case B2000000:
+-            baud_rate = 2000000;
+-            break;
+-        case B3000000:
+-            baud_rate = 3000000;
+-            break;
+-        case B4000000:
+-            baud_rate = 4000000;
+-            break;
+-        default:
+-            ALOGE( "%s: unsupported baud %d", __FUNCTION__, baud);
+-            break;
+-    }
+-
+-    ALOGI( "%s: Current Baudrate = %d bps", __FUNCTION__, baud_rate);
+-    return baud_rate;
+-}
+-
+-
+ #if (BT_WAKE_VIA_USERIAL_IOCTL==TRUE)
+ /*******************************************************************************
+ **
+@@ -210,7 +162,7 @@
+ *******************************************************************************/
+ void userial_vendor_init(void)
+ {
+-    vnd_userial.fd = -1;
++    vnd_userial.fd = vnd_userial.fd_lite = -1;
+     snprintf(vnd_userial.port_name, VND_PORT_NAME_MAXLEN, "%s", BT_HS_UART_DEVICE);
+ }
+ 
+@@ -357,26 +309,7 @@
+     cfsetospeed(&vnd_userial.termios, tcio_baud);
+     cfsetispeed(&vnd_userial.termios, tcio_baud);
+     tcsetattr(vnd_userial.fd, TCSADRAIN, &vnd_userial.termios); /* don't change speed until last write done */
+-}
+-
+-/*******************************************************************************
+-**
+-** Function        userial_vendor_get_baud
+-**
+-** Description     Get current baud rate
+-**
+-** Returns         int
+-**
+-*******************************************************************************/
+-int userial_vendor_get_baud(void)
+-{
+-    if (vnd_userial.fd == -1)
+-    {
+-        ALOGE( "%s: uart port(%s) has not been opened", __FUNCTION__, BT_HS_UART_DEVICE );
+-        return -1;
+-    }
+ 
+-    return userial_tcio_baud_to_int(cfgetispeed(&vnd_userial.termios));
+ }
+ 
+ /*******************************************************************************
+@@ -390,7 +323,8 @@
+ *******************************************************************************/
+ int userial_vendor_ioctl(userial_vendor_ioctl_op_t op, int *p_data)
+ {
+-    int err;
++    //PREVENT CID138306
++    int err = -1;
+ 
+     switch(op)
+     {
+diff -Naur '--exclude=.git' bt-orig/libbt-vendor/src/hw_ar3k.c bt/libbt-vendor/src/hw_ar3k.c
+--- bt-orig/libbt-vendor/src/hw_ar3k.c	2016-05-05 13:21:27.841761345 +0800
++++ bt/libbt-vendor/src/hw_ar3k.c	2016-05-05 13:23:44.877763853 +0800
+@@ -19,6 +19,8 @@
+  *
+  */
+ 
++ /*Gerbera - BT*/
++
+ /******************************************************************************
+  *
+  *  Filename:      hw_ar3k.c
+@@ -59,28 +61,18 @@
+ #define PATCH_LOC_STRING_LEN   8
+ char ARbyte[3];
+ char ARptr[MAX_PATCH_CMD + 1];
+-int byte_cnt;
+-int patch_count = 0;
+-char patch_loc[PATCH_LOC_STRING_LEN + 1];
+ int PSCounter=0;
+ 
+-uint32_t dev_type = 0;
+-uint32_t rom_version = 0;
+-uint32_t build_version = 0;
+-
+-char patch_file[PATH_MAX];
+-char ps_file[PATH_MAX];
+-FILE *stream;
+-int tag_count=0;
++
+ 
+ /* for friendly debugging outpout string */
+-static char *lpm_mode[] = {
++static const char *lpm_mode[] = {
+     "UNKNOWN",
+     "disabled",
+     "enabled"
+ };
+ 
+-static char *lpm_state[] = {
++static const char *lpm_state[] = {
+     "UNKNOWN",
+     "de-asserted",
+     "asserted"
+@@ -88,7 +80,15 @@
+ 
+ static uint8_t upio_state[UPIO_MAX_COUNT];
+ struct ps_cfg_entry ps_list[MAX_TAGS];
+-
++int ioctl(int, int, void *);
++int close(int fd);
++int tcflush(int fd, int queue);
++int tcgetattr(int fd, struct termios* s);
++void cfmakeraw(struct termios* s);
++int tcsendbreak(int fd, int duration);
++int cfsetospeed(struct termios *termios_p, speed_t speed);
++int cfsetispeed(struct termios *termios_p, speed_t speed);
++int tcsetattr(int fd, int optional_actions, const struct termios *termios_p);
+ #define PS_EVENT_LEN 100
+ 
+ #ifdef __cplusplus
+@@ -98,7 +98,7 @@
+ /*****************************************************************************
+ **   Functions
+ *****************************************************************************/
+-
++#ifdef PLATFORM_ANDROID
+ int is_bt_soc_ath() {
+     int ret = 0;
+     char bt_soc_type[PROPERTY_VALUE_MAX];
+@@ -288,7 +288,7 @@
+ 
+ static int write_cmd(int fd, uint8_t *buffer, int len)
+ {
+-    uint8_t *event;
++    uint8_t *event = NULL;
+     int err;
+ 
+     err = send_hci_cmd_sync(fd, buffer, len, &event);
+@@ -355,7 +355,7 @@
+ #define MAXPATHLEN  4096
+ static void get_ps_file_name(uint32_t devtype, uint32_t rom_version,char *path)
+ {
+-    char *filename;
++    const char *filename;
+ 
+     if (devtype == 0xdeadc0de)
+         filename = PS_ASIC_FILE;
+@@ -1241,7 +1241,7 @@
+         return dd;
+     }
+ 
+-    if (ioctl(dd, HCIDEVUP, dev_id) < 0 && errno != EALREADY) {
++    if (ioctl(dd, HCIDEVUP, &dev_id) < 0 && errno != EALREADY) {
+         perror("hci down:Power management Disabled");
+         hci_close_dev(dd);
+         return -1;
+@@ -1270,7 +1270,7 @@
+ 
+     struct termios ti;
+ 
+-    int i, fd;
++    int fd;
+     unsigned long flags = 0;
+ 
+     if (raw)
+@@ -1289,6 +1289,8 @@
+ 
+     if (tcgetattr(fd, &ti) < 0) {
+         ALOGI("Can't get port settings: %d\n", errno);
++        //PREVENT CID138220
++        close(fd);
+         return -1;
+     }
+ 
+@@ -1302,11 +1304,15 @@
+ 
+     if (tcsetattr(fd, TCSANOW, &ti) < 0) {
+         ALOGI("Can't set port settings");
++        //PREVENT CID138220
++        close(fd);
+         return -1;
+     }
+ 
+     if (set_speed(fd, &ti, u->init_speed) < 0) {
+         ALOGI("Can't set initial baud rate");
++        //PREVENT CID138220
++        close(fd);
+         return -1;
+     }
+ 
+@@ -1360,7 +1366,6 @@
+ {
+     ALOGI(" %s ", __FUNCTION__);
+     PSCounter=0;
+-    struct sigaction sa;
+     struct uart_t u ;
+     int n=0,send_break=0,raw=0;
+ 
+@@ -1377,10 +1382,10 @@
+ 
+     return n;
+ }
++#endif
+ 
+ void lpm_set_ar3k(uint8_t pio, uint8_t action, uint8_t polarity)
+ {
+-    int rc;
+     int fd = -1;
+     char buffer;
+ 
+@@ -1475,6 +1480,8 @@
+         case UPIO_HOST_WAKE:
+             ALOGI("upio_set: UPIO_HOST_WAKE");
+             break;
++        default:
++            ALOGI("lpm mode: %d  action: %d", pio, action);
+     }
+ 
+ }
+diff -Naur '--exclude=.git' bt-orig/libbt-vendor/src/hw_rome.c bt/libbt-vendor/src/hw_rome.c
+--- bt-orig/libbt-vendor/src/hw_rome.c	2016-05-05 13:21:27.841761345 +0800
++++ bt/libbt-vendor/src/hw_rome.c	2016-05-05 13:23:44.877763853 +0800
+@@ -1,4 +1,8 @@
+ /*
++ *  Copyright (c) 2015 Qualcomm Atheros, Inc.
++ *  All Rights Reserved.
++ *  Qualcomm Atheros Confidential and Proprietary.
++ *  NOT A CONTRIBUTION
+  *
+  *  Copyright (c) 2013, The Linux Foundation. All rights reserved.
+  *  Not a Contribution.
+@@ -19,6 +23,8 @@
+  *
+  */
+ 
++ /*Gerbera - BT*/
++
+ /******************************************************************************
+  *
+  *  Filename:      hw_rome.c
+@@ -66,10 +72,11 @@
+ patch_info rampatch_patch_info;
+ int rome_ver = ROME_VER_UNKNOWN;
+ unsigned char gTlv_type;
+-char *rampatch_file_path;
+-char *nvm_file_path;
++const char *rampatch_file_path;
++const char *nvm_file_path;
+ extern char enable_extldo;
+ 
++uint8_t soc_bd_addr[6]={0x00,0x00,0x00,0x00,0x00,0x00};//To check BD ADDR is programed
+ /******************************************************************************
+ **  Extern variables
+ ******************************************************************************/
+@@ -81,7 +88,7 @@
+ 
+ int get_vs_hci_event(unsigned char *rsp)
+ {
+-    int err = 0, i, soc_id =0;
++    int err = 0, soc_id =0;
+     unsigned char paramlen = 0;
+ 
+     if( (rsp[EVENTCODE_OFFSET] == VSEVENT_CODE) || (rsp[EVENTCODE_OFFSET] == EVT_CMD_COMPLETE))
+@@ -165,6 +172,10 @@
+                         break;
+                     }
+             break;
++            default:
++                ALOGE("%s: Not a valid status!!!", __FUNCTION__);
++                break;
++
+         }
+         break;
+ 
+@@ -198,7 +209,7 @@
+ int read_vs_hci_event(int fd, unsigned char* buf, int size)
+ {
+     int remain, r;
+-    int count = 0, i;
++    int count = 0;
+ 
+     if (size <= 0) {
+         ALOGE("Invalid size arguement!");
+@@ -524,7 +535,7 @@
+ 
+ static int rome_download_rampatch(int fd)
+ {
+-    int c, tmp, size, index, ret = -1;
++    int c, size, index, ret = -1;
+ 
+     ALOGI("%s: ", __FUNCTION__);
+ 
+@@ -599,8 +610,6 @@
+     free(phdr_buffer);
+ phdr_alloc_failed:
+     fclose(file);
+-error:
+-    return ret;
+ }
+ 
+ int rome_attach_rampatch(int fd)
+@@ -635,7 +644,7 @@
+ 
+ int rome_rampatch_reset(int fd)
+ {
+-    int size, err = 0, flags;
++    int size, err = 0;
+     unsigned char cmd[HCI_MAX_CMD_SIZE];
+     struct timespec tm = { 0, 100*1000*1000 }; /* 100 ms */
+ 
+@@ -663,11 +672,11 @@
+     return err;
+ }
+ 
+-int rome_get_tlv_file(char *file_path)
++int rome_get_tlv_file(const char *file_path)
+ {
+     FILE * pFile;
+     long fileSize;
+-    int readSize, err = 0, total_segment, remain_size, nvm_length, nvm_index, i;
++    int readSize, nvm_length, nvm_index, i;
+     unsigned short nvm_tag_len;
+     tlv_patch_info *ptlv_header;
+     tlv_nvm_hdr *nvm_ptr;
+@@ -684,6 +693,11 @@
+     /* Get File Size */
+     fseek (pFile , 0 , SEEK_END);
+     fileSize = ftell (pFile);
++    //PREVENT CID138376
++    if(fileSize < 0) {
++        fclose(pFile);
++        return -1;
++    }
+     rewind (pFile);
+ 
+     pdata_buffer = (unsigned char*) malloc (sizeof(char)*fileSize);
+@@ -695,7 +709,11 @@
+ 
+     /* Copy file into allocated buffer */
+     readSize = fread (pdata_buffer,1,fileSize,pFile);
+-
++    //PREVENT CID138376/CID138410
++    if(readSize < 0) {
++        fclose(pFile);
++        return -1;
++    }
+     /* File Close */
+     fclose (pFile);
+ 
+@@ -730,9 +748,10 @@
+     } else if(ptlv_header->tlv_type == TLV_TYPE_NVM) {
+         ALOGI("====================================================");
+         ALOGI("TLV Type\t\t\t : 0x%x", ptlv_header->tlv_type);
+-        ALOGI("Length\t\t\t : %d bytes",  nvm_length = (ptlv_header->tlv_length1) |
+-                                                    (ptlv_header->tlv_length2 << 8) |
+-                                                    (ptlv_header->tlv_length3 << 16));
++        //PREVENT CID138410
++        ALOGI("Length\t\t\t : %d bytes",  nvm_length = ((int)(ptlv_header->tlv_length1)) |
++                                                    ((int)(ptlv_header->tlv_length2) << 8) |
++                                                    ((int)(ptlv_header->tlv_length3) << 16));
+ 
+         if(nvm_length <= 0)
+             return readSize;
+@@ -882,7 +901,6 @@
+ int rome_1_0_nvm_tag_dnld(int fd)
+ {
+     int i, size, err = 0;
+-    unsigned char cmd[HCI_MAX_CMD_SIZE];
+     unsigned char rsp[HCI_MAX_EVENT_SIZE];
+ 
+ #if (NVM_VERSION >= ROME_1_0_100019)
+@@ -1200,12 +1218,14 @@
+     /* Total length of the packet to be sent to the Controller */
+     size = (HCI_CMD_IND + HCI_COMMAND_HDR_SIZE + VSC_SET_BAUDRATE_REQ_LEN);
+ 
++#ifndef X86_BUILD
+     /* Flow off during baudrate change */
+     if ((err = userial_vendor_ioctl(USERIAL_OP_FLOW_OFF , &flags)) < 0)
+     {
+       ALOGE("%s: HW Flow-off error: 0x%x\n", __FUNCTION__, err);
+       goto error;
+     }
++#endif
+ 
+     /* Send the HCI command packet to UART for transmission */
+     err = write(fd, cmd, size);
+@@ -1214,16 +1234,20 @@
+         goto error;
+     }
+ 
++#ifndef X86_BUILD
+     /* Change Local UART baudrate to high speed UART */
+     userial_vendor_set_baud(USERIAL_BAUD_3M);
++#endif 
+ 
++//PREVENT CID138310
++#ifndef X86_BUILD	
+     /* Flow on after changing local uart baudrate */
+     if ((err = userial_vendor_ioctl(USERIAL_OP_FLOW_ON , &flags)) < 0)
+     {
+         ALOGE("%s: HW Flow-on error: 0x%x \n", __FUNCTION__, err);
+         return err;
+     }
+-
++#endif
+     /* Check for response from the Controller */
+     if ((err =read_vs_hci_event(fd, rsp, HCI_MAX_EVENT_SIZE)) < 0) {
+             ALOGE("%s: Failed to get HCI-VS Event from SOC", __FUNCTION__);
+@@ -1309,7 +1333,6 @@
+     unsigned char cmd[HCI_MAX_CMD_SIZE];
+     unsigned char rsp[HCI_MAX_EVENT_SIZE];
+     hci_command_hdr *cmd_hdr;
+-    int flags;
+ 
+     ALOGI("%s: HCI RESET ", __FUNCTION__);
+ 
+@@ -1387,6 +1410,105 @@
+     return ret;
+ }
+ 
++bool is_default_addr()
++{
++    ALOGV("is_default_addr");
++    if (soc_bd_addr[0] == 0x00 &&
++        soc_bd_addr[1] == 0x00 &&
++        soc_bd_addr[2] == 0x00 &&
++        soc_bd_addr[3] == 0x00 &&
++        soc_bd_addr[4] == 0x5a &&
++        soc_bd_addr[5] == 0xad )
++    {
++        ALOGE("BD ADDR read from SoC is default");
++        return TRUE;
++    }
++    else
++        return FALSE;
++}
++
++bool check_current_bdaddr(int fd)
++{
++    int size, err = 0,i;
++    unsigned char cmd[HCI_MAX_CMD_SIZE];
++    unsigned char rsp[HCI_MAX_EVENT_SIZE];
++    ALOGD("check_current_bdaddr");
++    hci_command_hdr *cmd_hdr;
++
++    memset(cmd, 0x0, HCI_MAX_CMD_SIZE);
++    rome_hci_reset(fd);
++
++    cmd_hdr = (void *) (cmd + 1);
++    cmd[0]  = HCI_COMMAND_PKT;
++    cmd_hdr->opcode = HCI_READ_BD_ADDR;
++    cmd_hdr->plen = HCIC_PARAM_SIZE_READ_CMD;
++    size = (HCI_CMD_IND + HCI_COMMAND_HDR_SIZE);
++    err = write(fd,cmd,size);
++    if (err != size)
++    {
++        ALOGE("Failed to send HCI_READ_BD_ADDR cmd");
++        return FALSE;
++    }
++    err = read_hci_event(fd, rsp, HCI_MAX_EVENT_SIZE);
++    if (err < 0)
++    {
++        ALOGE("Failed to get response");
++        return FALSE;
++    }
++    for (i = 0;i < 6; i++)
++         soc_bd_addr[5-i] = rsp[7+i];
++    return (!is_default_addr());
++}
++int update_local_bd_addr(int fd, char *bdaddr)
++{
++    int size, err = 0,i;
++    unsigned char cmd[HCI_MAX_CMD_SIZE];
++    unsigned char rsp[HCI_MAX_EVENT_SIZE];
++    hci_command_hdr *cmd_hdr;
++
++    memset(cmd, 0x0, HCI_MAX_CMD_SIZE);
++    err = check_current_bdaddr(fd);
++    if (err)
++    {
++        ALOGD("BD ADDR is programmed");
++        return 0;
++    }
++    cmd_hdr = (void *) (cmd + 1);
++    cmd[0]  = HCI_COMMAND_PKT;
++    cmd_hdr->opcode = cmd_opcode_pack(HCI_VENDOR_CMD_OGF, HCI_VS_WR_BT_ADDR);
++    cmd_hdr->plen = 0x06;
++    cmd[9] = *bdaddr;
++    cmd[8] = *(bdaddr+1);
++    cmd[7] = *(bdaddr+2);
++    cmd[6] = *(bdaddr+3);
++    cmd[5] = *(bdaddr+4);
++    cmd[4] = *(bdaddr+5);
++    /* Total length of the packet to be sent to the Controller */
++    size = (HCI_CMD_IND + HCI_COMMAND_HDR_SIZE + cmd_hdr->plen);
++    ALOGD("%s: Sending HCI_VS_WR_BT_ADDR_CMD", __FUNCTION__);
++    ALOGD("HCI-CMD: \t0x%x \t0x%x \t0x%x \t0x%x \t0x%x \t0x%x \t0x%x \t0x%x \t0x%x \t0x%x",
++          cmd[0], cmd[1], cmd[2], cmd[3], cmd[4], cmd[5], cmd[6], cmd[7], cmd[8], cmd[9]);
++
++    err = write(fd,cmd,size);
++    if (err != size) {
++        ALOGE("Failed to send HCI_VS_WR_BT_ADDR_CMD command!");
++        goto error;
++    }
++
++    err = read_hci_event(fd, rsp, HCI_MAX_EVENT_SIZE);
++    if ( err < 0) {
++        ALOGE("Failed to set BD address!");
++        goto error;
++    }
++
++    err = read_hci_event(fd, rsp, HCI_MAX_EVENT_SIZE);
++    if (err < 0) {
++        ALOGE("%s: Failed to get command complete", __FUNCTION__);
++        goto error;
++    }
++error:
++    return err;
++}
+ int rome_soc_init(int fd, char *bdaddr)
+ {
+     int err = -1, size = 0;
+@@ -1465,6 +1587,7 @@
+             nvm_file_path = ROME_NVM_TLV_3_0_0_PATH;
+ 
+ download:
++#ifndef X86_BUILD	
+             /* Change baud rate 115.2 kbps to 3Mbps*/
+             err = rome_set_baudrate_req(fd);
+             if (err < 0) {
+@@ -1472,7 +1595,7 @@
+                 goto error;
+             }
+             ALOGI("%s: Baud rate changed successfully ", __FUNCTION__);
+-
++#endif
+             /* Donwload TLV files (rampatch, NVM) */
+             err = rome_download_tlv_file(fd);
+             if (err < 0) {
+diff -Naur '--exclude=.git' bt-orig/libbt-vendor/src/qcom_etc.c bt/libbt-vendor/src/qcom_etc.c
+--- bt-orig/libbt-vendor/src/qcom_etc.c	1970-01-01 08:00:00.000000000 +0800
++++ bt/libbt-vendor/src/qcom_etc.c	2016-05-05 13:23:44.877763853 +0800
+@@ -0,0 +1,26 @@
++#include <stdio.h>
++#include <cutils/properties.h>
++#include <string.h>
++void strlcpy(char *a,char *b,size_t n){
++    strncpy(a,b,n);
++}
++
++int property_set(const char *key, const char *value){
++    return 0;
++}
++
++int property_get(const char *key, char *value, const char *default_value){
++    int len;
++    if(default_value)
++    {
++       len = strlen(default_value);
++	if(len >= PROPERTY_VALUE_MAX)
++	{
++		len = PROPERTY_VALUE_MAX -1 ;
++	}
++    	memcpy(value, default_value, len);
++	value[len]='\0';
++    }
++    return 0;
++}
++

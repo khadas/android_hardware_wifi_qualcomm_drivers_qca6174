@@ -1,0 +1,2299 @@
+diff -urN qcacld-new.orig/CORE/EPPING/src/epping_txrx.c qcacld-new/CORE/EPPING/src/epping_txrx.c
+--- qcacld-new.orig/CORE/EPPING/src/epping_txrx.c	2016-07-06 04:57:55.000000000 +0800
++++ qcacld-new/CORE/EPPING/src/epping_txrx.c	2016-07-06 14:32:11.792346964 +0800
+@@ -355,7 +355,11 @@
+    struct net_device *dev;
+    epping_adapter_t *pAdapter;
+ 
+-   dev = alloc_netdev(sizeof(epping_adapter_t), "wifi%d", ether_setup);
++   dev = alloc_netdev(sizeof(epping_adapter_t), "wifi%d", 
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,17,0)) || defined(WITH_BACKPORTS)
++           NET_NAME_UNKNOWN,
++#endif 
++           ether_setup);
+    if (dev == NULL) {
+       EPPING_LOG(VOS_TRACE_LEVEL_FATAL,
+          "%s: Cannot allocate epping_adapter_t\n", __func__);
+diff -urN qcacld-new.orig/CORE/HDD/inc/wlan_hdd_cfg80211.h qcacld-new/CORE/HDD/inc/wlan_hdd_cfg80211.h
+--- qcacld-new.orig/CORE/HDD/inc/wlan_hdd_cfg80211.h	2016-07-06 04:57:55.000000000 +0800
++++ qcacld-new/CORE/HDD/inc/wlan_hdd_cfg80211.h	2016-07-06 14:32:11.792346964 +0800
+@@ -785,7 +785,7 @@
+ 
+ #ifdef FEATURE_WLAN_WAPI
+ void wlan_hdd_cfg80211_set_key_wapi(hdd_adapter_t* pAdapter,
+-              u8 key_index, const u8 *mac_addr, u8 *key , int key_Len);
++              u8 key_index, const u8 *mac_addr, const u8 *key , int key_Len);
+ #endif
+ struct wiphy *wlan_hdd_cfg80211_wiphy_alloc(int priv_size);
+ 
+@@ -836,10 +836,25 @@
+ void* wlan_hdd_change_country_code_cb(void *pAdapter);
+ void hdd_select_cbmode( hdd_adapter_t *pAdapter,v_U8_t operationChannel);
+ 
+-v_U8_t* wlan_hdd_cfg80211_get_ie_ptr(v_U8_t *pIes, int length, v_U8_t eid);
++v_U8_t* wlan_hdd_cfg80211_get_ie_ptr(const v_U8_t *pIes, int length, v_U8_t eid);
+ 
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 0, 0))
++#define CFG80211_DEL_STA_V2
++#endif
++
++#ifdef CFG80211_DEL_STA_V2
++int wlan_hdd_cfg80211_del_station(struct wiphy *wiphy,
++                                  struct net_device *dev,
++                                  struct station_del_parameters *param);
++#else
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,16,0)) || defined(WITH_BACKPORTS)
+ int wlan_hdd_cfg80211_del_station(struct wiphy *wiphy,
+-                                         struct net_device *dev, u8 *mac);
++                                  struct net_device *dev, const u8 *mac);
++#else
++int wlan_hdd_cfg80211_del_station(struct wiphy *wiphy,
++                                  struct net_device *dev, u8 *mac);
++#endif
++#endif
+ 
+ #if defined(QCA_WIFI_2_0) && defined(QCA_WIFI_FTM) \
+     && !defined(QCA_WIFI_ISOC) && defined(CONFIG_NL80211_TESTMODE)
+diff -urN qcacld-new.orig/CORE/HDD/inc/wlan_hdd_cfg.h qcacld-new/CORE/HDD/inc/wlan_hdd_cfg.h
+--- qcacld-new.orig/CORE/HDD/inc/wlan_hdd_cfg.h	2016-07-06 04:57:55.000000000 +0800
++++ qcacld-new/CORE/HDD/inc/wlan_hdd_cfg.h	2016-07-06 14:32:11.792346964 +0800
+@@ -309,6 +309,15 @@
+ #endif
+ }eHddDot11Mode;
+ 
++enum
++{
++	WLAN_HDD_RX_HANDLE_MIN       = 0,
++	WLAN_HDD_RX_HANDLE_IRQ       = WLAN_HDD_RX_HANDLE_MIN,
++	WLAN_HDD_RX_HANDLE_RX_THREAD = 1,
++	WLAN_HDD_RX_HANDLE_RPS       = 2,
++	WLAN_HDD_RX_HANDLE_MAX       = WLAN_HDD_RX_HANDLE_RPS
++};
++
+ #define CFG_DOT11_MODE_NAME                    "gDot11Mode"
+ #define CFG_DOT11_MODE_MIN                     eHDD_DOT11_MODE_AUTO
+ #ifdef WLAN_FEATURE_11AC
+diff -urN qcacld-new.orig/CORE/HDD/inc/wlan_hdd_hostapd.h qcacld-new/CORE/HDD/inc/wlan_hdd_hostapd.h
+--- qcacld-new.orig/CORE/HDD/inc/wlan_hdd_hostapd.h	2016-07-06 04:57:55.000000000 +0800
++++ qcacld-new/CORE/HDD/inc/wlan_hdd_hostapd.h	2016-07-06 14:32:11.792346964 +0800
+@@ -55,7 +55,7 @@
+ /* max length of command string in hostapd ioctl */
+ #define HOSTAPD_IOCTL_COMMAND_STRLEN_MAX   8192
+ 
+-hdd_adapter_t* hdd_wlan_create_ap_dev( hdd_context_t *pHddCtx, tSirMacAddr macAddr, tANI_U8 *name);
++hdd_adapter_t* hdd_wlan_create_ap_dev( hdd_context_t *pHddCtx, tSirMacAddr macAddr, unsigned char name_assign_type, tANI_U8 *name);
+ 
+ VOS_STATUS hdd_register_hostapd(hdd_adapter_t *pAdapter, tANI_U8 rtnl_held);
+ 
+@@ -76,8 +76,8 @@
+ eCsrEncryptionType
+ hdd_TranslateWPAToCsrEncryptionType(u_int8_t cipher_suite[4]);
+ 
+-VOS_STATUS hdd_softap_sta_deauth(hdd_adapter_t*,v_U8_t*);
+-void hdd_softap_sta_disassoc(hdd_adapter_t*,v_U8_t*);
++VOS_STATUS hdd_softap_sta_deauth(hdd_adapter_t*, struct tagCsrDelStaParams*);
++void hdd_softap_sta_disassoc(hdd_adapter_t*, struct tagCsrDelStaParams*);
+ void hdd_softap_tkip_mic_fail_counter_measure(hdd_adapter_t*,v_BOOL_t);
+ int hdd_softap_unpackIE( tHalHandle halHandle,
+                 eCsrEncryptionType *pEncryptType,
+diff -urN qcacld-new.orig/CORE/HDD/inc/wlan_hdd_main.h qcacld-new/CORE/HDD/inc/wlan_hdd_main.h
+--- qcacld-new.orig/CORE/HDD/inc/wlan_hdd_main.h	2016-07-06 04:57:55.000000000 +0800
++++ qcacld-new/CORE/HDD/inc/wlan_hdd_main.h	2016-07-06 14:32:11.792346964 +0800
+@@ -1584,6 +1584,7 @@
+ 
+ hdd_adapter_t* hdd_open_adapter( hdd_context_t *pHddCtx, tANI_U8 session_type,
+                                  const char* name, tSirMacAddr macAddr,
++                                 unsigned char name_assign_type,
+                                  tANI_U8 rtnl_held );
+ VOS_STATUS hdd_close_adapter( hdd_context_t *pHddCtx, hdd_adapter_t *pAdapter, tANI_U8 rtnl_held );
+ VOS_STATUS hdd_close_all_adapters( hdd_context_t *pHddCtx );
+diff -urN qcacld-new.orig/CORE/HDD/inc/wlan_hdd_p2p.h qcacld-new/CORE/HDD/inc/wlan_hdd_p2p.h
+--- qcacld-new.orig/CORE/HDD/inc/wlan_hdd_p2p.h	2016-07-06 04:57:55.000000000 +0800
++++ qcacld-new/CORE/HDD/inc/wlan_hdd_p2p.h	2016-07-06 14:32:11.792346964 +0800
+@@ -137,7 +137,10 @@
+ int wlan_hdd_check_remain_on_channel(hdd_adapter_t *pAdapter);
+ void wlan_hdd_cancel_existing_remain_on_channel(hdd_adapter_t *pAdapter);
+ 
+-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,6,0))
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,14,0)) || defined(WITH_BACKPORTS)
++int wlan_hdd_mgmt_tx(struct wiphy *wiphy, struct wireless_dev *wdev,
++                     struct cfg80211_mgmt_tx_params *params, u64 *cookie);
++#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(3,6,0))
+ int wlan_hdd_mgmt_tx( struct wiphy *wiphy, struct wireless_dev *wdev,
+                      struct ieee80211_channel *chan, bool offchan,
+ #if (LINUX_VERSION_CODE < KERNEL_VERSION(3,8,0))
+@@ -162,8 +165,15 @@
+                      const u8 *buf, size_t len, u64 *cookie );
+ #endif
+ 
++#if  (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0))
++struct wireless_dev *wlan_hdd_add_virtual_intf(struct wiphy *wiphy, 
++                                               const char *name,
++                                               unsigned char name_assign_type,
++                                               enum nl80211_iftype type,
++                                               u32 *flags,
++                                               struct vif_params *params);
+ 
+-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,7,0))
++#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(3,7,0)) || defined(WITH_BACKPORTS)
+ struct wireless_dev* wlan_hdd_add_virtual_intf(
+                   struct wiphy *wiphy, const char *name,
+                   enum nl80211_iftype type,
+diff -urN qcacld-new.orig/CORE/HDD/inc/wlan_hdd_softap_tx_rx.h qcacld-new/CORE/HDD/inc/wlan_hdd_softap_tx_rx.h
+--- qcacld-new.orig/CORE/HDD/inc/wlan_hdd_softap_tx_rx.h	2016-07-06 04:57:55.000000000 +0800
++++ qcacld-new/CORE/HDD/inc/wlan_hdd_softap_tx_rx.h	2016-07-06 14:32:11.792346964 +0800
+@@ -74,7 +74,7 @@
+   @return         : NET_XMIT_DROP if packets are dropped
+                   : NET_XMIT_SUCCESS if packet is enqueued succesfully
+   ===========================================================================*/
+-extern int hdd_softap_hard_start_xmit(struct sk_buff *skb, struct net_device *dev);
++extern netdev_tx_t hdd_softap_hard_start_xmit(struct sk_buff *skb, struct net_device *dev);
+ 
+ /**============================================================================
+   @brief hdd_softap_tx_timeout() - Function called by OS if there is any
+diff -urN qcacld-new.orig/CORE/HDD/inc/wlan_hdd_tx_rx.h qcacld-new/CORE/HDD/inc/wlan_hdd_tx_rx.h
+--- qcacld-new.orig/CORE/HDD/inc/wlan_hdd_tx_rx.h	2016-07-06 04:57:55.000000000 +0800
++++ qcacld-new/CORE/HDD/inc/wlan_hdd_tx_rx.h	2016-07-06 14:32:11.792346964 +0800
+@@ -93,7 +93,7 @@
+   @return         : NET_XMIT_DROP if packets are dropped
+                   : NET_XMIT_SUCCESS if packet is enqueued succesfully
+   ===========================================================================*/
+-extern int hdd_hard_start_xmit(struct sk_buff *skb, struct net_device *dev);
++extern netdev_tx_t hdd_hard_start_xmit(struct sk_buff *skb, struct net_device *dev);
+ 
+ extern int hdd_mon_hard_start_xmit(struct sk_buff *skb, struct net_device *dev);
+ /**============================================================================
+diff -urN qcacld-new.orig/CORE/HDD/inc/wlan_hdd_wmm.h qcacld-new/CORE/HDD/inc/wlan_hdd_wmm.h
+--- qcacld-new.orig/CORE/HDD/inc/wlan_hdd_wmm.h	2016-07-06 04:57:55.000000000 +0800
++++ qcacld-new/CORE/HDD/inc/wlan_hdd_wmm.h	2016-07-06 14:32:11.792346964 +0800
+@@ -60,6 +60,7 @@
+ #include <wlan_hdd_wext.h>
+ #include <wlan_qct_tl.h>
+ #include <sme_QosApi.h>
++#include <linux/netdevice.h>
+ 
+ /*----------------------------------------------------------------------------
+  * Preprocessor Definitions and Constants
+@@ -253,8 +254,7 @@
+ 
+   @return         : queue_index/linux AC value.
+   ===========================================================================*/
+-v_U16_t hdd_wmm_select_queue(struct net_device * dev, struct sk_buff *skb);
+-
++ v_U16_t hdd_wmm_select_queue(struct net_device * dev, struct sk_buff *skb);
+ /**============================================================================
+   @brief hdd_hostapd_select_queue() - Function which will classify the packet
+          according to linux qdisc expectation.
+@@ -266,8 +266,9 @@
+   @return         : Qdisc queue index
+   ===========================================================================*/
+ 
+-v_U16_t hdd_hostapd_select_queue(struct net_device * dev, struct sk_buff *skb);
+-
++ u16 hdd_hostapd_select_queue(struct net_device * dev, struct sk_buff *skb
++                                , void *accel_priv
++                                , select_queue_fallback_t fallback); 
+ 
+ 
+ /**============================================================================
+diff -urN qcacld-new.orig/CORE/HDD/src/wlan_hdd_assoc.c qcacld-new/CORE/HDD/src/wlan_hdd_assoc.c
+--- qcacld-new.orig/CORE/HDD/src/wlan_hdd_assoc.c	2016-07-06 04:57:55.000000000 +0800
++++ qcacld-new/CORE/HDD/src/wlan_hdd_assoc.c	2016-07-06 14:32:11.792346964 +0800
+@@ -67,6 +67,10 @@
+ #ifdef IPA_OFFLOAD
+ #include <wlan_hdd_ipa.h>
+ #endif
++
++//#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,13,0))
++//#define INIT_COMPLETION(x) reinit_completion(&x)
++//#endif
+ v_BOOL_t mibIsDot11DesiredBssTypeInfrastructure( hdd_adapter_t *pAdapter );
+ 
+ struct ether_addr
+@@ -1917,7 +1921,9 @@
+          if (pRoamInfo->pBssDesc)
+          {
+             struct cfg80211_bss *bss;
+-
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,13,0))
++            struct ieee80211_channel *chan;
++#endif
+             /* we created the IBSS, notify supplicant */
+             hddLog(VOS_TRACE_LEVEL_INFO, "%s: %s: created ibss "
+                    MAC_ADDRESS_STR,
+@@ -1934,7 +1940,13 @@
+                return;
+             }
+ 
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,13,0))
++            chan = ieee80211_get_channel(pAdapter->wdev.wiphy,
++                                        (int)pRoamInfo->pBssDesc->channelId);
++            cfg80211_ibss_joined(pAdapter->dev, bss->bssid, chan, GFP_KERNEL);
++#else
+             cfg80211_ibss_joined(pAdapter->dev, bss->bssid, GFP_KERNEL);
++#endif
+             cfg80211_put_bss(
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,9,0))
+                              pHddCtx->wiphy,
+@@ -4508,12 +4520,20 @@
+     /* Get pAdapter from Destination mac address of the frame */
+     if (type == SIR_MAC_MGMT_FRAME && subType == SIR_MAC_MGMT_DISASSOC)
+     {
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 11, 0)) || defined(WITH_BACKPORTS)
++        cfg80211_rx_unprot_mlme_mgmt(pAdapter->dev, pbFrames, nFrameLength);
++#else
+         cfg80211_send_unprot_disassoc(pAdapter->dev, pbFrames, nFrameLength);
++#endif
+         pAdapter->hdd_stats.hddPmfStats.numUnprotDisassocRx++;
+     }
+     else if (type == SIR_MAC_MGMT_FRAME && subType == SIR_MAC_MGMT_DEAUTH)
+     {
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 11, 0)) || defined(WITH_BACKPORTS)
++         cfg80211_rx_unprot_mlme_mgmt(pAdapter->dev, pbFrames, nFrameLength);
++#else
+         cfg80211_send_unprot_deauth(pAdapter->dev, pbFrames, nFrameLength);
++#endif
+         pAdapter->hdd_stats.hddPmfStats.numUnprotDeauthRx++;
+     }
+     else
+diff -urN qcacld-new.orig/CORE/HDD/src/wlan_hdd_cfg80211.c qcacld-new/CORE/HDD/src/wlan_hdd_cfg80211.c
+--- qcacld-new.orig/CORE/HDD/src/wlan_hdd_cfg80211.c	2016-07-06 04:57:55.000000000 +0800
++++ qcacld-new/CORE/HDD/src/wlan_hdd_cfg80211.c	2016-07-06 14:32:11.796346964 +0800
+@@ -109,7 +109,7 @@
+ #include "wlan_hdd_nan.h"
+ #endif
+ #include "wlan_hdd_mdns_offload.h"
+-
++#include "csrApi.h"
+ #define g_mode_rates_size (12)
+ #define a_mode_rates_size (8)
+ #define FREQ_BASE_80211G          (2407)
+@@ -738,6 +738,15 @@
+ };
+ #endif /* WLAN_NL80211_TESTMODE */
+ 
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,11,0)) || defined(WITH_BACKPORTS)
++static const struct wiphy_wowlan_support wowlan_support_cfg80211_init = {
++    .flags = WIPHY_WOWLAN_MAGIC_PKT,
++    .n_patterns = WOWL_MAX_PTRNS_ALLOWED,
++    .pattern_min_len = 1,
++    .pattern_max_len = WOWL_PTRN_MAX_SIZE,
++};
++#endif
++
+ #ifdef FEATURE_WLAN_EXTSCAN
+ 
+ static const struct nla_policy
+@@ -811,6 +820,7 @@
+     }
+ 
+     vendor_event = cfg80211_vendor_event_alloc(pHddCtx->wiphy,
++                              NULL,
+                               sizeof(tHddAvoidFreqList),
+                               QCA_NL80211_VENDOR_SUBCMD_AVOID_FREQUENCY_INDEX,
+                               GFP_KERNEL);
+@@ -886,6 +896,7 @@
+     }
+ 
+     vendor_event = cfg80211_vendor_event_alloc(pHddCtx->wiphy,
++                                   NULL,
+                                    data->event_data_len +
+                                    NLMSG_HDRLEN,
+                                    QCA_NL80211_VENDOR_SUBCMD_NAN_INDEX,
+@@ -1149,6 +1160,7 @@
+ 
+ 
+     vendor_event = cfg80211_vendor_event_alloc(pHddCtx->wiphy,
++                                               NULL,
+                                                data->event_data_len +
+                                                sizeof(tANI_U32) +
+                                                NLMSG_HDRLEN + NLMSG_HDRLEN,
+@@ -2508,6 +2520,7 @@
+      * the sizeof (tSirWifiRateStat) being 32.
+      */
+     vendor_event = cfg80211_vendor_event_alloc(pHddCtx->wiphy,
++                             NULL,
+                              LL_STATS_EVENT_BUF_SIZE +
+                              NLMSG_HDRLEN,
+                              QCA_NL80211_VENDOR_SUBCMD_LL_PEER_INFO_STATS_INDEX,
+@@ -2611,6 +2624,7 @@
+      * interface statistics.
+      */
+     vendor_event = cfg80211_vendor_event_alloc(pHddCtx->wiphy,
++                                 NULL,
+                                  LL_STATS_EVENT_BUF_SIZE +
+                                  NLMSG_HDRLEN,
+                                  QCA_NL80211_VENDOR_SUBCMD_LL_IFACE_STATS_INDEX,
+@@ -2778,6 +2792,7 @@
+      */
+ 
+     vendor_event = cfg80211_vendor_event_alloc(pHddCtx->wiphy,
++                                 NULL,
+                                  LL_STATS_EVENT_BUF_SIZE + NLMSG_HDRLEN,
+                                  QCA_NL80211_VENDOR_SUBCMD_LL_RADIO_STATS_INDEX,
+                                  GFP_KERNEL);
+@@ -3581,8 +3596,11 @@
+ 
+     /* This will disable updating of NL channels from passive to
+      * active if a beacon is received on passive channel. */
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,14,0)) || defined(WITH_BACKPORTS)
++    wiphy->regulatory_flags |= REGULATORY_DISABLE_BEACON_HINTS;
++#else
+     wiphy->flags |=   WIPHY_FLAG_DISABLE_BEACON_HINTS;
+-
++#endif
+ 
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,4,0))
+     wiphy->flags |= WIPHY_FLAG_HAVE_AP_SME
+@@ -3592,13 +3610,21 @@
+                  |  WIPHY_FLAG_4ADDR_STATION
+ #endif
+                     | WIPHY_FLAG_OFFCHAN_TX;
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,14,0)) || defined(WITH_BACKPORTS)
++    wiphy->regulatory_flags = REGULATORY_COUNTRY_IE_IGNORE;
++#else
+     wiphy->country_ie_pref = NL80211_COUNTRY_IE_IGNORE_CORE;
+ #endif
++#endif
+ 
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,11,0)) || defined(WITH_BACKPORTS)
++    wiphy->wowlan = &wowlan_support_cfg80211_init;
++#else
+     wiphy->wowlan.flags = WIPHY_WOWLAN_MAGIC_PKT;
+     wiphy->wowlan.n_patterns = WOWL_MAX_PTRNS_ALLOWED;
+     wiphy->wowlan.pattern_min_len = 1;
+     wiphy->wowlan.pattern_max_len = WOWL_PTRN_MAX_SIZE;
++#endif
+ 
+ #if  defined (WLAN_FEATURE_VOWIFI_11R) || defined (FEATURE_WLAN_ESE) || defined(FEATURE_WLAN_LFR)
+     if (pCfg->isFastTransitionEnabled
+@@ -3836,39 +3862,6 @@
+ }
+ #endif
+ 
+-/* In this function we are updating channel list when,
+-   regulatory domain is FCC and country code is US.
+-   Here In FCC standard 5GHz UNII-1 Bands are indoor only.
+-   As per FCC smart phone is not a indoor device.
+-   GO should not opeate on indoor channels */
+-void wlan_hdd_cfg80211_update_reg_info(struct wiphy *wiphy)
+-{
+-    int j;
+-    hdd_context_t *pHddCtx = wiphy_priv(wiphy);
+-    tANI_U8 defaultCountryCode[3] = SME_INVALID_COUNTRY_CODE;
+-    //Default counrtycode from NV at the time of wiphy initialization.
+-    if (eHAL_STATUS_SUCCESS != sme_GetDefaultCountryCodeFrmNv(pHddCtx->hHal,
+-                                  &defaultCountryCode[0]))
+-    {
+-       hddLog(LOGE, FL("Failed to get default country code from NV"));
+-    }
+-    if ((defaultCountryCode[0]== 'U') && (defaultCountryCode[1]=='S'))
+-    {
+-       if (NULL == wiphy->bands[IEEE80211_BAND_5GHZ])
+-       {
+-          hddLog(VOS_TRACE_LEVEL_ERROR,"%s: wiphy->bands[IEEE80211_BAND_5GHZ] is NULL",__func__ );
+-          return;
+-       }
+-       for (j = 0; j < wiphy->bands[IEEE80211_BAND_5GHZ]->n_channels; j++)
+-       {
+-          struct ieee80211_supported_band *band = wiphy->bands[IEEE80211_BAND_5GHZ];
+-          // Mark UNII -1 band channel as passive
+-          if (WLAN_HDD_CHANNEL_IN_UNII_1_BAND(band->channels[j].center_freq))
+-             band->channels[j].flags |= IEEE80211_CHAN_PASSIVE_SCAN;
+-       }
+-    }
+-}
+-
+ /* This function registers for all frame which supplicant is interested in */
+ void wlan_hdd_cfg80211_register_frames(hdd_adapter_t* pAdapter)
+ {
+@@ -3964,7 +3957,7 @@
+ 
+ #ifdef FEATURE_WLAN_WAPI
+ void wlan_hdd_cfg80211_set_key_wapi(hdd_adapter_t* pAdapter, u8 key_index,
+-                                     const u8 *mac_addr, u8 *key , int key_Len)
++                                     const u8 *mac_addr, const u8 *key , int key_Len)
+ {
+     hdd_station_ctx_t *pHddStaCtx = WLAN_HDD_GET_STATION_CTX_PTR(pAdapter);
+     tCsrRoamSetKey  setKey;
+@@ -4120,10 +4113,10 @@
+ 
+ }
+ 
+-v_U8_t* wlan_hdd_cfg80211_get_ie_ptr(v_U8_t *pIes, int length, v_U8_t eid)
++v_U8_t* wlan_hdd_cfg80211_get_ie_ptr(const v_U8_t *pIes, int length, v_U8_t eid)
+ {
+     int left = length;
+-    v_U8_t *ptr = pIes;
++    v_U8_t *ptr = (v_U8_t *)pIes;
+     v_U8_t elem_id,elem_len;
+ 
+     while(left >= 2)
+@@ -6814,9 +6807,10 @@
+ }
+ #endif
+ 
++
+ static int wlan_hdd_change_station(struct wiphy *wiphy,
+                                          struct net_device *dev,
+-                                         u8 *mac,
++                                         const u8 *mac,
+                                          struct station_parameters *params)
+ {
+     VOS_STATUS status = VOS_STATUS_SUCCESS;
+@@ -6955,7 +6949,7 @@
+                 }
+             }
+ 
+-            status = wlan_hdd_tdls_set_peer_caps(pAdapter, mac,
++            status = wlan_hdd_tdls_set_peer_caps(pAdapter, (u8*)mac,
+                                                   &StaParams, isBufSta,
+                                                   isOffChannelSupported);
+             if (VOS_STATUS_SUCCESS != status) {
+@@ -6964,7 +6958,7 @@
+                 return -EINVAL;
+             }
+ 
+-            status = wlan_hdd_tdls_add_station(wiphy, dev, mac, 1, &StaParams);
++            status = wlan_hdd_tdls_add_station(wiphy, dev, (u8*)mac, 1, &StaParams);
+             if (VOS_STATUS_SUCCESS != status) {
+                 hddLog(VOS_TRACE_LEVEL_ERROR,
+                        FL("wlan_hdd_tdls_add_station failed!"));
+@@ -7749,78 +7743,6 @@
+ }
+ 
+ /*
+- * FUNCTION: wlan_hdd_cfg80211_inform_bss
+- * This function is used to inform the BSS details to nl80211 interface.
+- */
+-static struct cfg80211_bss* wlan_hdd_cfg80211_inform_bss(
+-                    hdd_adapter_t *pAdapter, tCsrRoamConnectedProfile *roamProfile)
+-{
+-    struct net_device *dev = pAdapter->dev;
+-    struct wireless_dev *wdev = dev->ieee80211_ptr;
+-    struct wiphy *wiphy = wdev->wiphy;
+-    tSirBssDescription *pBssDesc = roamProfile->pBssDesc;
+-    int chan_no;
+-    int ie_length;
+-    const char *ie;
+-    unsigned int freq;
+-    struct ieee80211_channel *chan;
+-    int rssi = 0;
+-    struct cfg80211_bss *bss = NULL;
+-
+-    ENTER();
+-
+-    if( NULL == pBssDesc )
+-    {
+-        hddLog(VOS_TRACE_LEVEL_FATAL, "%s: pBssDesc is NULL", __func__);
+-        return bss;
+-    }
+-
+-    chan_no = pBssDesc->channelId;
+-    ie_length = GET_IE_LEN_IN_BSS_DESC( pBssDesc->length );
+-    ie =  ((ie_length != 0) ? (const char *)&pBssDesc->ieFields: NULL);
+-
+-    if( NULL == ie )
+-    {
+-       hddLog(VOS_TRACE_LEVEL_FATAL, "%s: IE of BSS descriptor is NULL", __func__);
+-       return bss;
+-    }
+-
+-    if (chan_no <= ARRAY_SIZE(hdd_channels_2_4_GHZ))
+-    {
+-        freq = ieee80211_channel_to_frequency(chan_no, IEEE80211_BAND_2GHZ);
+-    }
+-    else
+-    {
+-        freq = ieee80211_channel_to_frequency(chan_no, IEEE80211_BAND_5GHZ);
+-    }
+-
+-    chan = __ieee80211_get_channel(wiphy, freq);
+-
+-    if (!chan) {
+-       hddLog(VOS_TRACE_LEVEL_ERROR, "%s chan pointer is NULL", __func__);
+-       return NULL;
+-    }
+-
+-    bss = cfg80211_get_bss(wiphy, chan, pBssDesc->bssId,
+-                           &roamProfile->SSID.ssId[0], roamProfile->SSID.length,
+-                           WLAN_CAPABILITY_ESS, WLAN_CAPABILITY_ESS);
+-    if (bss == NULL)
+-    {
+-        rssi = (VOS_MIN ((pBssDesc->rssi + pBssDesc->sinr), 0))*100;
+-
+-        return (cfg80211_inform_bss(wiphy, chan, pBssDesc->bssId,
+-                le64_to_cpu(*(__le64 *)pBssDesc->timeStamp),
+-                pBssDesc->capabilityInfo,
+-                pBssDesc->beaconInterval, ie, ie_length,
+-                rssi, GFP_KERNEL ));
+-}
+-    else
+-    {
+-        return bss;
+-    }
+-}
+-
+-/*
+  * FUNCTION: wlan_hdd_cfg80211_update_bss_list
+  * This function is used to inform nl80211 interface that BSS might have
+  * been lost.
+@@ -8059,9 +7981,8 @@
+ 
+     if (NULL != roamProfile.pBssDesc)
+     {
+-        bss = wlan_hdd_cfg80211_inform_bss(pAdapter,
+-                &roamProfile);
+-
++        bss = wlan_hdd_cfg80211_inform_bss_frame(pAdapter,
++                                                    roamProfile.pBssDesc);
+         if (NULL == bss)
+         {
+             hddLog(VOS_TRACE_LEVEL_INFO, "%s: cfg80211_inform_bss return NULL",
+@@ -8075,6 +7996,7 @@
+         hddLog(VOS_TRACE_LEVEL_ERROR, "%s:  roamProfile.pBssDesc is NULL",
+                 __func__);
+     }
++    EXIT();
+     return bss;
+ }
+ 
+@@ -9451,12 +9373,12 @@
+  * This function is used to parse WPA/RSN IE's.
+  */
+ int wlan_hdd_cfg80211_set_ie( hdd_adapter_t *pAdapter,
+-                              u8 *ie,
++                              const u8 *ie,
+                               size_t ie_len
+                               )
+ {
+     hdd_wext_state_t *pWextState = WLAN_HDD_GET_WEXT_STATE_PTR(pAdapter);
+-    u8 *genie = ie;
++    const u8 *genie = ie;
+     v_U16_t remLen = ie_len;
+ #ifdef FEATURE_WLAN_WAPI
+     v_U32_t akmsuite[MAX_NUM_AKM_SUITES];
+@@ -9693,7 +9615,7 @@
+  * Parse the received IE to find the WPA IE
+  *
+  */
+-static bool hdd_isWPAIEPresent(u8 *ie, u8 ie_len)
++static bool hdd_isWPAIEPresent(const u8 *ie, u8 ie_len)
+ {
+     v_U8_t eLen = 0;
+     v_U16_t remLen = ie_len;
+@@ -10582,7 +10504,7 @@
+         pHddCtx->cfg_ini->isCoalesingInIBSSAllowed == 0 &&
+         alloc_bssid == VOS_TRUE)
+     {
+-        vos_mem_free(params->bssid);
++        vos_mem_free((v_U8_t *)params->bssid);
+     }
+    return 0;
+ }
+@@ -11108,7 +11030,7 @@
+     }
+ 
+     wlan_hdd_get_rssi(pAdapter, &sinfo->signal);
+-    sinfo->filled |= STATION_INFO_SIGNAL;
++    sinfo->filled |= BIT(NL80211_STA_INFO_SIGNAL);
+ 
+     wlan_hdd_get_station_stats(pAdapter);
+     rate_flags = pAdapter->hdd_stats.ClassA_stat.tx_rate_flags;
+@@ -11407,12 +11329,12 @@
+             if (rate_flags & eHAL_TX_RATE_VHT80)
+             {
+                 sinfo->txrate.flags |= RATE_INFO_FLAGS_VHT_MCS;
+-                sinfo->txrate.flags |= RATE_INFO_FLAGS_80_MHZ_WIDTH;
++                sinfo->txrate.bw = RATE_INFO_BW_80;
+             }
+             else if (rate_flags & eHAL_TX_RATE_VHT40)
+             {
+                 sinfo->txrate.flags |= RATE_INFO_FLAGS_VHT_MCS;
+-                sinfo->txrate.flags |= RATE_INFO_FLAGS_40_MHZ_WIDTH;
++                sinfo->txrate.bw = RATE_INFO_BW_40;
+             }
+             else if (rate_flags & eHAL_TX_RATE_VHT20)
+             {
+@@ -11426,7 +11348,7 @@
+                 sinfo->txrate.flags |= RATE_INFO_FLAGS_MCS;
+                 if (rate_flags & eHAL_TX_RATE_HT40)
+                 {
+-                    sinfo->txrate.flags |= RATE_INFO_FLAGS_40_MHZ_WIDTH;
++                    sinfo->txrate.bw = RATE_INFO_BW_40;
+                 }
+             }
+             if (rate_flags & eHAL_TX_RATE_SGI)
+@@ -11476,12 +11398,12 @@
+             }
+             if (rate_flags & eHAL_TX_RATE_HT40)
+             {
+-                sinfo->txrate.flags |= RATE_INFO_FLAGS_40_MHZ_WIDTH;
++                sinfo->txrate.bw = RATE_INFO_BW_40;
+             }
+ #ifdef WLAN_FEATURE_11AC
+             else if (rate_flags & eHAL_TX_RATE_VHT80)
+             {
+-                sinfo->txrate.flags |= RATE_INFO_FLAGS_80_MHZ_WIDTH;
++                sinfo->txrate.bw = RATE_INFO_BW_80;
+             }
+ #endif /* WLAN_FEATURE_11AC */
+ #ifdef LINKSPEED_DEBUG_ENABLED
+@@ -11491,10 +11413,10 @@
+ #endif //LINKSPEED_DEBUG_ENABLED
+         }
+     }
+-    sinfo->filled |= STATION_INFO_TX_BITRATE;
++    sinfo->filled |= BIT(NL80211_STA_INFO_TX_BITRATE);
+ 
+     sinfo->tx_bytes = pAdapter->stats.tx_bytes;
+-    sinfo->filled |= STATION_INFO_TX_BYTES;
++    sinfo->filled |= BIT(NL80211_STA_INFO_TX_BYTES);
+ 
+     sinfo->tx_packets =
+        pAdapter->hdd_stats.summary_stat.tx_frm_cnt[0] +
+@@ -11515,15 +11437,15 @@
+        pAdapter->hdd_stats.summary_stat.fail_cnt[3];
+ 
+     sinfo->filled |=
+-       STATION_INFO_TX_PACKETS |
+-       STATION_INFO_TX_RETRIES |
+-       STATION_INFO_TX_FAILED;
++       BIT(NL80211_STA_INFO_TX_PACKETS) |
++       BIT(NL80211_STA_INFO_TX_RETRIES) |
++       BIT(NL80211_STA_INFO_TX_FAILED);
+ 
+     sinfo->rx_bytes = pAdapter->stats.rx_bytes;
+-    sinfo->filled |= STATION_INFO_RX_BYTES;
++    sinfo->filled |= BIT(NL80211_STA_INFO_RX_BYTES);
+ 
+     sinfo->rx_packets = pAdapter->stats.rx_packets;
+-    sinfo->filled |= STATION_INFO_RX_PACKETS;
++    sinfo->filled |= BIT(NL80211_STA_INFO_RX_PACKETS);
+ 
+     MTRACE(vos_trace(VOS_MODULE_ID_HDD,
+                      TRACE_CODE_HDD_CFG80211_GET_STA,
+@@ -11532,14 +11454,21 @@
+        return 0;
+ }
+ 
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,16,0)) || defined(WITH_BACKPORTS)
++static int wlan_hdd_cfg80211_get_station(struct wiphy *wiphy,
++                                         struct net_device *dev,
++                                         const u8* mac,
++                                         struct station_info *sinfo)
++#else
+ static int wlan_hdd_cfg80211_get_station(struct wiphy *wiphy,
+                                          struct net_device *dev,
+                                          u8* mac, struct station_info *sinfo)
++#endif
+ {
+     int ret;
+ 
+     vos_ssr_protect(__func__);
+-    ret = __wlan_hdd_cfg80211_get_station(wiphy, dev, mac, sinfo);
++    ret = __wlan_hdd_cfg80211_get_station(wiphy, dev, (u8*)mac, sinfo);
+     vos_ssr_unprotect(__func__);
+ 
+     return ret;
+@@ -11666,7 +11595,8 @@
+ #endif //LINUX_VERSION_CODE
+ 
+ static int __wlan_hdd_cfg80211_del_station(struct wiphy *wiphy,
+-                                           struct net_device *dev, u8 *mac)
++                                      struct net_device *dev,
++                                      struct tagCsrDelStaParams *pDelStaParams)
+ {
+     hdd_adapter_t *pAdapter = WLAN_HDD_GET_PRIV_PTR(dev);
+     hdd_context_t *pHddCtx;
+@@ -11683,10 +11613,12 @@
+ 
+     pHddCtx = WLAN_HDD_GET_CTX(pAdapter);
+     status = wlan_hdd_validate_context(pHddCtx);
+-
+-    if (0 != status) {
+-        hddLog(VOS_TRACE_LEVEL_ERROR, FL("HDD context is not valid"));
++    if (0 != status)
+         return status;
++
++    if (VOS_FTM_MODE == hdd_get_conparam()) {
++        hddLog(LOGE, FL("Command not allowed in FTM mode"));
++        return -EINVAL;
+     }
+ 
+     if (VOS_FTM_MODE == hdd_get_conparam()) {
+@@ -11703,21 +11635,40 @@
+                   "%s: pHostapdState is Null", __func__);
+             return 0;
+         }
+-        if (NULL == mac) {
++
++        if (vos_is_macaddr_broadcast((v_MACADDR_t *)pDelStaParams->peerMacAddr))
++        {
+             v_U16_t i;
+             for (i = 0; i < WLAN_MAX_STA_COUNT; i++) {
+                 if ((pAdapter->aStaInfo[i].isUsed) &&
+                     (!pAdapter->aStaInfo[i].isDeauthInProgress)) {
+-                    u8 *macAddr = pAdapter->aStaInfo[i].macAddrSTA.bytes;
++                    vos_mem_copy(pDelStaParams->peerMacAddr,
++                                 pAdapter->aStaInfo[i].macAddrSTA.bytes,
++                                 ETHER_ADDR_LEN);
++
++#ifdef IPA_UC_OFFLOAD
++                    if (pHddCtx->cfg_ini->IpaUcOffloadEnabled) {
++                       hdd_ipa_wlan_evt(pAdapter, pAdapter->aStaInfo[i].ucSTAId,
++                          WLAN_CLIENT_DISCONNECT, pDelStaParams->peerMacAddr);
++                    }
++#endif /* IPA_UC_OFFLOAD */
+                     hddLog(VOS_TRACE_LEVEL_INFO,
+-                           "%s: Delete STA with MAC::"
+-                            MAC_ADDRESS_STR,
+-                            __func__, MAC_ADDR_ARRAY(macAddr));
++                           FL("Delete STA with MAC::"MAC_ADDRESS_STR),
++                           MAC_ADDR_ARRAY(pDelStaParams->peerMacAddr));
++
++                    /* Case: SAP in ACS selected DFS ch and station connected.
++                     * Now Radar detected. Then if random channel is another DFS
++                     * ch then new CAC is initiated and no TX allowed. Thus
++                     * do not send any mgmt frames as it will timeout during CAC
++                     */
++                    if (pHddCtx->dev_dfs_cac_status == DFS_CAC_IN_PROGRESS)
++                        goto fn_end;
+ 
+                     /* Send disassoc and deauth both to avoid some IOT issues */
+                     vos_event_reset(&pHostapdState->vosEvent);
+-                    hdd_softap_sta_disassoc(pAdapter, macAddr);
+-                    vos_status = hdd_softap_sta_deauth(pAdapter, macAddr);
++                    hdd_softap_sta_disassoc(pAdapter, pDelStaParams);
++
++                    vos_status = hdd_softap_sta_deauth(pAdapter, pDelStaParams);
+                     if (VOS_IS_STATUS_SUCCESS(vos_status)) {
+                         pAdapter->aStaInfo[i].isDeauthInProgress = TRUE;
+                         vos_status = vos_wait_single_event(
+@@ -11729,42 +11680,52 @@
+                 }
+             }
+         } else {
+-            vos_status = hdd_softap_GetStaId(pAdapter,(v_MACADDR_t *)mac, &staId);
++            vos_status = hdd_softap_GetStaId(pAdapter,
++                            (v_MACADDR_t *)pDelStaParams->peerMacAddr, &staId);
+             if (!VOS_IS_STATUS_SUCCESS(vos_status)) {
+                 hddLog(VOS_TRACE_LEVEL_INFO,
+-                       "%s: Skip this DEL STA as this is not used::"
+-                       MAC_ADDRESS_STR,
+-                       __func__, MAC_ADDR_ARRAY(mac));
++                       FL("Skip DEL STA as this is not used::"MAC_ADDRESS_STR),
++                       MAC_ADDR_ARRAY(pDelStaParams->peerMacAddr));
+                 return -ENOENT;
+             }
+ 
++#ifdef IPA_UC_OFFLOAD
++            if (pHddCtx->cfg_ini->IpaUcOffloadEnabled) {
++               hdd_ipa_wlan_evt(pAdapter, staId,
++                  WLAN_CLIENT_DISCONNECT, pDelStaParams->peerMacAddr);
++            }
++#endif /* IPA_UC_OFFLOAD */
++
+             if (pAdapter->aStaInfo[staId].isDeauthInProgress == TRUE) {
+                 hddLog(VOS_TRACE_LEVEL_INFO,
+-                       "%s: Skip this DEL STA as deauth is in progress::"
+-                       MAC_ADDRESS_STR,
+-                       __func__, MAC_ADDR_ARRAY(mac));
++                       FL("Skip DEL STA as deauth is in progress::"
++                          MAC_ADDRESS_STR),
++                          MAC_ADDR_ARRAY(pDelStaParams->peerMacAddr));
+                 return -ENOENT;
+             }
+ 
+             pAdapter->aStaInfo[staId].isDeauthInProgress = TRUE;
+ 
+             hddLog(VOS_TRACE_LEVEL_INFO,
+-                                "%s: Delete STA with MAC::"
+-                                MAC_ADDRESS_STR,
+-                                __func__,
+-                                MAC_ADDR_ARRAY(mac));
++                   FL("Delete STA with MAC::"MAC_ADDRESS_STR),
++                   MAC_ADDR_ARRAY(pDelStaParams->peerMacAddr));
++
++            if (pHddCtx->dev_dfs_cac_status == DFS_CAC_IN_PROGRESS)
++                goto fn_end;
+ 
+             /* Send disassoc and deauth both to avoid some IOT issues */
+             vos_event_reset(&pHostapdState->vosEvent);
+-            hdd_softap_sta_disassoc(pAdapter, mac);
+-            vos_status = hdd_softap_sta_deauth(pAdapter, mac);
++            sme_send_disassoc_req_frame(WLAN_HDD_GET_HAL_CTX(pAdapter),
++                             pAdapter->sessionId,
++                             (uint8_t *)pDelStaParams->peerMacAddr,
++                             pDelStaParams->reason_code, 0);
++
++            vos_status = hdd_softap_sta_deauth(pAdapter, pDelStaParams);
+             if (!VOS_IS_STATUS_SUCCESS(vos_status)) {
+                 pAdapter->aStaInfo[staId].isDeauthInProgress = FALSE;
+                 hddLog(VOS_TRACE_LEVEL_INFO,
+-                                "%s: STA removal failed for ::"
+-                                MAC_ADDRESS_STR,
+-                                __func__,
+-                                MAC_ADDR_ARRAY(mac));
++                       FL("STA removal failed for ::"MAC_ADDRESS_STR),
++                       MAC_ADDR_ARRAY(pDelStaParams->peerMacAddr));
+                 return -ENOENT;
+             } else {
+                 vos_status = vos_wait_single_event(&pHostapdState->vosEvent,
+@@ -11776,25 +11737,53 @@
+         }
+     }
+ 
++fn_end:
+     EXIT();
+-
+     return 0;
+ }
+ 
++#ifdef CFG80211_DEL_STA_V2
++int wlan_hdd_cfg80211_del_station(struct wiphy *wiphy,
++                                         struct net_device *dev,
++                                         struct station_del_parameters *param)
++#else
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,16,0)) || defined(WITH_BACKPORTS)
++int wlan_hdd_cfg80211_del_station(struct wiphy *wiphy,
++                                  struct net_device *dev, const u8 *mac)
++#else
+ int wlan_hdd_cfg80211_del_station(struct wiphy *wiphy,
+                                   struct net_device *dev, u8 *mac)
++#endif
++#endif
+ {
+     int ret;
++    struct tagCsrDelStaParams delStaParams;
+ 
+     vos_ssr_protect(__func__);
+-    ret = __wlan_hdd_cfg80211_del_station(wiphy, dev, mac);
++#ifdef CFG80211_DEL_STA_V2
++    if (NULL == param) {
++        hddLog(LOGE, FL("Invalid argument passed"));
++        vos_ssr_unprotect(__func__);
++        return -EINVAL;
++    }
++
++    WLANSAP_PopulateDelStaParams(param->mac, param->reason_code,
++                                 param->subtype, &delStaParams);
++
++#else
++    WLANSAP_PopulateDelStaParams(mac, eSIR_MAC_DEAUTH_LEAVING_BSS_REASON,
++                                 (SIR_MAC_MGMT_DEAUTH >> 4), &delStaParams);
++#endif
++    ret = __wlan_hdd_cfg80211_del_station(wiphy, dev, &delStaParams);
+     vos_ssr_unprotect(__func__);
+ 
+     return ret;
+ }
+ 
+ static int __wlan_hdd_cfg80211_add_station(struct wiphy *wiphy,
+-          struct net_device *dev, u8 *mac, struct station_parameters *params)
++                                           struct net_device *dev,
++                                           const u8 *mac,
++                                           struct station_parameters *params)
+ {
+     int status = -EPERM;
+ #ifdef FEATURE_WLAN_TDLS
+@@ -11810,38 +11799,47 @@
+     }
+ 
+ 
++    if (VOS_FTM_MODE == hdd_get_conparam()) {
++        hddLog(LOGE, FL("Command not allowed in FTM mode"));
++        return -EINVAL;
++    }
++
+     MTRACE(vos_trace(VOS_MODULE_ID_HDD,
+                      TRACE_CODE_HDD_CFG80211_ADD_STA,
+                      pAdapter->sessionId, params->listen_interval));
+ 
+     if (0 != wlan_hdd_validate_context(pHddCtx))
+-    {
+-       VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+-                 "%s: HDD context is not valid", __func__);
+        return -EINVAL;
+-    }
+ 
+     mask = params->sta_flags_mask;
+-
+     set = params->sta_flags_set;
+ 
+-#ifdef WLAN_FEATURE_TDLS_DEBUG
+-    VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+-               "%s: mask 0x%x set 0x%x " MAC_ADDRESS_STR,
+-               __func__, mask, set, MAC_ADDR_ARRAY(mac));
+-#endif
++    VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
++              FL("mask 0x%x set 0x%x " MAC_ADDRESS_STR),
++              mask, set, MAC_ADDR_ARRAY(mac));
+ 
+     if (mask & BIT(NL80211_STA_FLAG_TDLS_PEER)) {
+         if (set & BIT(NL80211_STA_FLAG_TDLS_PEER)) {
+-            status = wlan_hdd_tdls_add_station(wiphy, dev, mac, 0, NULL);
++            status = wlan_hdd_tdls_add_station(wiphy, dev, (u8*)mac, 0, NULL);
+         }
+     }
+ #endif
++    EXIT();
+     return status;
+ }
+ 
++
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,16,0)) || defined(WITH_BACKPORTS)
+ static int wlan_hdd_cfg80211_add_station(struct wiphy *wiphy,
+-          struct net_device *dev, u8 *mac, struct station_parameters *params)
++                                         struct net_device *dev,
++                                         const u8 *mac,
++                                         struct station_parameters *params)
++#else
++static int wlan_hdd_cfg80211_add_station(struct wiphy *wiphy,
++                                         struct net_device *dev,
++                                         u8 *mac,
++                                         struct station_parameters *params)
++#endif
+ {
+     int ret;
+ 
+@@ -11896,7 +11894,7 @@
+ 
+     for (j = 0; j < pHddStaCtx->PMKIDCacheIndex; j++) {
+         if (vos_mem_compare(pHddStaCtx->PMKIDCache[j].BSSID,
+-                    pmksa->bssid, VOS_MAC_ADDR_SIZE)) {
++                    (v_U8_t *)pmksa->bssid, VOS_MAC_ADDR_SIZE)) {
+             /* BSSID matched previous entry. Overwrite it. */
+             BSSIDMatched = 1;
+             vos_mem_copy(pHddStaCtx->PMKIDCache[j].BSSID,
+@@ -11907,7 +11905,7 @@
+             hddLog(VOS_TRACE_LEVEL_DEBUG, FL("Reusing cache entry %d"), j);
+             hddLog(VOS_TRACE_LEVEL_INFO, MAC_ADDRESS_STR,
+                MAC_ADDR_ARRAY(pmksa->bssid));
+-            dump_pmkid(halHandle, pmksa->pmkid);
++            dump_pmkid(halHandle, (tANI_U8*)pmksa->pmkid);
+             break;
+         }
+     }
+@@ -11926,7 +11924,7 @@
+                FL("Adding a new cache entry %d"), pHddStaCtx->PMKIDCacheIndex);
+         hddLog(VOS_TRACE_LEVEL_INFO, MAC_ADDRESS_STR,
+                MAC_ADDR_ARRAY(pmksa->bssid));
+-        dump_pmkid(halHandle, pmksa->pmkid);
++        dump_pmkid(halHandle, (tANI_U8*)pmksa->pmkid);
+         /* Increment the HDD Local Cache index */
+         if (pHddStaCtx->PMKIDCacheIndex <= (MAX_PMKSAIDS_IN_CACHE - 1))
+             pHddStaCtx->PMKIDCacheIndex++;
+@@ -12013,7 +12011,7 @@
+      */
+     for (j = 0; j < pHddStaCtx->PMKIDCacheIndex; j++) {
+           if (vos_mem_compare(pHddStaCtx->PMKIDCache[j].BSSID,
+-                             pmksa->bssid,
++                             (v_U8_t *)pmksa->bssid,
+                              VOS_MAC_ADDR_SIZE)) {
+              /* BSSID matched entry */
+              BSSIDMatched = 1;
+@@ -12041,7 +12039,7 @@
+              /* Delete the last PMKID cache in CSR */
+              if (eHAL_STATUS_SUCCESS !=
+                  sme_RoamDelPMKIDfromCache(halHandle,
+-                                           pAdapter->sessionId, pmksa->bssid))
++                                           pAdapter->sessionId, (v_U8_t *)pmksa->bssid))
+              {
+                 hddLog(LOGE, FL("Cannot delete PMKSA %d CONTENT"),
+                              pHddStaCtx->PMKIDCacheIndex);
+@@ -12050,7 +12048,7 @@
+ 
+              hddLog(VOS_TRACE_LEVEL_INFO, MAC_ADDRESS_STR,
+                MAC_ADDR_ARRAY(pmksa->bssid));
+-             dump_pmkid(halHandle,pmksa->pmkid);
++             dump_pmkid(halHandle, (tANI_U8*)pmksa->pmkid);
+ 
+              break;
+           }
+@@ -12061,7 +12059,7 @@
+        hddLog(VOS_TRACE_LEVEL_DEBUG,
+               FL("No such PMKSA entry exists "MAC_ADDRESS_STR),
+               MAC_ADDR_ARRAY(pmksa->bssid));
+-       dump_pmkid(halHandle, pmksa->pmkid);
++       dump_pmkid(halHandle, (tANI_U8*)pmksa->pmkid);
+        return -EINVAL;
+     }
+     return status;
+@@ -12690,14 +12688,20 @@
+ 
+ 
+ #ifdef FEATURE_WLAN_TDLS
++
+ #if TDLS_MGMT_VERSION2
+ static int wlan_hdd_cfg80211_tdls_mgmt(struct wiphy *wiphy, struct net_device *dev,
+                      u8 *peer, u8 action_code,  u8 dialog_token,
+                       u16 status_code, u32 peer_capability, const u8 *buf, size_t len)
+-#else
+-static int wlan_hdd_cfg80211_tdls_mgmt(struct wiphy *wiphy, struct net_device *dev,
+-                     u8 *peer, u8 action_code,  u8 dialog_token,
+-                     u16 status_code, const u8 *buf, size_t len)
++#else /* TDLS_MGMT_VERSION2 */
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 17, 0)) || defined(WITH_BACKPORTS)
++static int wlan_hdd_cfg80211_tdls_mgmt(struct wiphy *wiphy,
++					struct net_device *dev,
++					const u8 *peer, u8 action_code,
++					u8 dialog_token, u16 status_code,
++					u32 peer_capability, bool initiator,
++					const u8 *buf, size_t len)
++#endif
+ #endif
+ {
+ 
+@@ -12710,7 +12714,6 @@
+     long rc;
+     tANI_U16 numCurrTdlsPeers;
+ #if !(TDLS_MGMT_VERSION2)
+-    u32 peer_capability;
+     peer_capability = 0;
+ #endif
+ 
+@@ -12766,7 +12769,7 @@
+ 
+     if (WLAN_IS_TDLS_SETUP_ACTION(action_code))
+     {
+-        if (NULL != wlan_hdd_tdls_is_progress(pHddCtx, peer, TRUE))
++        if (NULL != wlan_hdd_tdls_is_progress(pHddCtx, (u8*)peer, TRUE))
+         {
+             VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+                        "%s: " MAC_ADDRESS_STR
+@@ -12813,7 +12816,7 @@
+         else
+         {
+             hddTdlsPeer_t *pTdlsPeer;
+-            pTdlsPeer = wlan_hdd_tdls_find_peer(pAdapter, peer, TRUE);
++            pTdlsPeer = wlan_hdd_tdls_find_peer(pAdapter, (u8*)peer, TRUE);
+             if (pTdlsPeer && TDLS_IS_CONNECTED(pTdlsPeer))
+             {
+                 VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+@@ -12946,6 +12949,7 @@
+     return 0;
+ }
+ 
++
+ static int __wlan_hdd_cfg80211_tdls_oper(struct wiphy *wiphy,
+                                          struct net_device *dev,
+                                          u8 *peer,
+@@ -13324,13 +13328,13 @@
+ 
+ static int wlan_hdd_cfg80211_tdls_oper(struct wiphy *wiphy,
+                                        struct net_device *dev,
+-                                       u8 *peer,
++                                       const u8 *peer,
+                                        enum nl80211_tdls_operation oper)
+ {
+     int ret;
+ 
+     vos_ssr_protect(__func__);
+-    ret = __wlan_hdd_cfg80211_tdls_oper(wiphy, dev, peer, oper);
++    ret = __wlan_hdd_cfg80211_tdls_oper(wiphy, dev, (u8*)peer, oper);
+     vos_ssr_unprotect(__func__);
+ 
+     return ret;
+@@ -13347,7 +13351,7 @@
+                             WLAN_TDLS_DISCOVERY_REQUEST, 1, 0, 0, NULL, 0);
+ #else
+     return wlan_hdd_cfg80211_tdls_mgmt(wiphy, dev, peer,
+-                            WLAN_TDLS_DISCOVERY_REQUEST, 1, 0, NULL, 0);
++                            WLAN_TDLS_DISCOVERY_REQUEST, 1, 0, 0, 0, NULL, 0);
+ #endif
+ }
+ #endif
+@@ -13802,7 +13806,11 @@
+    return err;
+ }
+ 
+-static int wlan_hdd_cfg80211_testmode(struct wiphy *wiphy, void *data, int len)
++static int wlan_hdd_cfg80211_testmode(struct wiphy *wiphy,
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,12,0)) || defined(WITH_BACKPORTS)
++                                      struct wireless_dev *wdev,
++#endif
++                                      void *data, int len)
+ {
+    int ret;
+ 
+@@ -14433,6 +14441,7 @@
+     }
+ 
+     skb = cfg80211_vendor_event_alloc(pHddCtx->wiphy,
++                      NULL,
+                       EXTSCAN_EVENT_BUF_SIZE + NLMSG_HDRLEN,
+                       QCA_NL80211_VENDOR_SUBCMD_EXTSCAN_GET_CAPABILITIES_INDEX,
+                       GFP_KERNEL);
+@@ -14512,6 +14521,7 @@
+     }
+ 
+     skb = cfg80211_vendor_event_alloc(pHddCtx->wiphy,
++                                 NULL,
+                                  EXTSCAN_EVENT_BUF_SIZE + NLMSG_HDRLEN,
+                                  QCA_NL80211_VENDOR_SUBCMD_EXTSCAN_START_INDEX,
+                                  GFP_KERNEL);
+@@ -14552,6 +14562,7 @@
+     }
+ 
+     skb = cfg80211_vendor_event_alloc(pHddCtx->wiphy,
++                                 NULL,
+                                  EXTSCAN_EVENT_BUF_SIZE + NLMSG_HDRLEN,
+                                  QCA_NL80211_VENDOR_SUBCMD_EXTSCAN_STOP_INDEX,
+                                  GFP_KERNEL);
+@@ -14595,6 +14606,7 @@
+         return;
+     }
+     skb = cfg80211_vendor_event_alloc(pHddCtx->wiphy,
++                     NULL,
+                      EXTSCAN_EVENT_BUF_SIZE + NLMSG_HDRLEN,
+                      QCA_NL80211_VENDOR_SUBCMD_EXTSCAN_SET_BSSID_HOTLIST_INDEX,
+                      GFP_KERNEL);
+@@ -14639,6 +14651,7 @@
+     }
+ 
+     skb = cfg80211_vendor_event_alloc(pHddCtx->wiphy,
++                   NULL,
+                    EXTSCAN_EVENT_BUF_SIZE + NLMSG_HDRLEN,
+                    QCA_NL80211_VENDOR_SUBCMD_EXTSCAN_RESET_BSSID_HOTLIST_INDEX,
+                    GFP_KERNEL);
+@@ -14683,6 +14696,7 @@
+     }
+ 
+     skb = cfg80211_vendor_event_alloc(pHddCtx->wiphy,
++                NULL,
+                 EXTSCAN_EVENT_BUF_SIZE + NLMSG_HDRLEN,
+                 QCA_NL80211_VENDOR_SUBCMD_EXTSCAN_SET_SIGNIFICANT_CHANGE_INDEX,
+                 GFP_KERNEL);
+@@ -14728,6 +14742,7 @@
+     }
+ 
+     skb = cfg80211_vendor_event_alloc(pHddCtx->wiphy,
++              NULL,
+               EXTSCAN_EVENT_BUF_SIZE + NLMSG_HDRLEN,
+               QCA_NL80211_VENDOR_SUBCMD_EXTSCAN_RESET_SIGNIFICANT_CHANGE_INDEX,
+               GFP_KERNEL);
+@@ -14772,6 +14787,7 @@
+     }
+ 
+     skb = cfg80211_vendor_event_alloc(pHddCtx->wiphy,
++                    NULL,
+                     EXTSCAN_EVENT_BUF_SIZE + NLMSG_HDRLEN,
+                     QCA_NL80211_VENDOR_SUBCMD_EXTSCAN_GET_CACHED_RESULTS_INDEX,
+                     GFP_KERNEL);
+@@ -14907,6 +14923,7 @@
+     }
+ 
+     skb = cfg80211_vendor_event_alloc(pHddCtx->wiphy,
++                      NULL,
+                       EXTSCAN_EVENT_BUF_SIZE + NLMSG_HDRLEN,
+                       QCA_NL80211_VENDOR_SUBCMD_EXTSCAN_HOTLIST_AP_FOUND_INDEX,
+                       GFP_KERNEL);
+@@ -15022,6 +15039,7 @@
+     }
+ 
+     skb = cfg80211_vendor_event_alloc(pHddCtx->wiphy,
++                    NULL,
+                     EXTSCAN_EVENT_BUF_SIZE + NLMSG_HDRLEN,
+                     QCA_NL80211_VENDOR_SUBCMD_EXTSCAN_SIGNIFICANT_CHANGE_INDEX,
+                     GFP_KERNEL);
+@@ -15121,6 +15139,7 @@
+     }
+ 
+     skb = cfg80211_vendor_event_alloc(pHddCtx->wiphy,
++                  NULL,
+                   EXTSCAN_EVENT_BUF_SIZE + NLMSG_HDRLEN,
+                   QCA_NL80211_VENDOR_SUBCMD_EXTSCAN_FULL_SCAN_RESULT_INDEX,
+                   GFP_KERNEL);
+@@ -15217,6 +15236,7 @@
+     }
+ 
+     skb = cfg80211_vendor_event_alloc(pHddCtx->wiphy,
++                NULL,
+                 EXTSCAN_EVENT_BUF_SIZE + NLMSG_HDRLEN,
+                 QCA_NL80211_VENDOR_SUBCMD_EXTSCAN_SCAN_RESULTS_AVAILABLE_INDEX,
+                 GFP_KERNEL);
+@@ -15264,6 +15284,7 @@
+     }
+ 
+     skb = cfg80211_vendor_event_alloc(pHddCtx->wiphy,
++                            NULL,
+                             EXTSCAN_EVENT_BUF_SIZE + NLMSG_HDRLEN,
+                             QCA_NL80211_VENDOR_SUBCMD_EXTSCAN_SCAN_EVENT_INDEX,
+                             GFP_KERNEL);
+diff -urN qcacld-new.orig/CORE/HDD/src/wlan_hdd_ftm.c qcacld-new/CORE/HDD/src/wlan_hdd_ftm.c
+--- qcacld-new.orig/CORE/HDD/src/wlan_hdd_ftm.c	2016-07-06 04:57:55.000000000 +0800
++++ qcacld-new/CORE/HDD/src/wlan_hdd_ftm.c	2016-07-06 14:32:11.804346964 +0800
+@@ -766,7 +766,9 @@
+ {
+     hdd_adapter_t *pAdapter;
+     pAdapter = hdd_open_adapter( pHddCtx, WLAN_HDD_FTM, "wlan%d",
+-                wlan_hdd_get_intf_addr(pHddCtx), FALSE);
++                wlan_hdd_get_intf_addr(pHddCtx), 
++                NET_NAME_UNKNOWN,
++                FALSE);
+     if( NULL == pAdapter )
+     {
+        hddLog(VOS_TRACE_LEVEL_ERROR,"%s: hdd_open_adapter failed", __func__);
+diff -urN qcacld-new.orig/CORE/HDD/src/wlan_hdd_hostapd.c qcacld-new/CORE/HDD/src/wlan_hdd_hostapd.c
+--- qcacld-new.orig/CORE/HDD/src/wlan_hdd_hostapd.c	2016-07-06 04:57:55.000000000 +0800
++++ qcacld-new/CORE/HDD/src/wlan_hdd_hostapd.c	2016-07-06 14:32:11.808346964 +0800
+@@ -549,6 +549,7 @@
+ {
+     v_U8_t staId = 0;
+     struct net_device *dev;
++    struct tagCsrDelStaParams delStaParams;
+     dev = (struct net_device *)usrDataForCallback;
+ 
+     hddLog(LOGE, FL("Clearing all the STA entry...."));
+@@ -557,12 +558,17 @@
+         if ( pHostapdAdapter->aStaInfo[staId].isUsed &&
+            ( staId != (WLAN_HDD_GET_AP_CTX_PTR(pHostapdAdapter))->uBCStaId))
+         {
++             WLANSAP_PopulateDelStaParams(&pHostapdAdapter->aStaInfo[staId].macAddrSTA.bytes[0],
++                                                    eSIR_MAC_DEAUTH_LEAVING_BSS_REASON,
++                                                    (SIR_MAC_MGMT_DISASSOC >> 4),
++                                                     &delStaParams);
+             //Disconnect all the stations
+-            hdd_softap_sta_disassoc(pHostapdAdapter, &pHostapdAdapter->aStaInfo[staId].macAddrSTA.bytes[0]);
++            hdd_softap_sta_disassoc(pHostapdAdapter, &delStaParams);
+         }
+     }
+ }
+ 
++
+ static int hdd_stop_p2p_link(hdd_adapter_t *pHostapdAdapter,v_PVOID_t usrDataForCallback)
+ {
+     struct net_device *dev;
+@@ -1163,9 +1169,17 @@
+                   staInfo.assoc_req_ies =
+                      (const u8 *)&pSapEvent->sapevt.sapStationAssocReassocCompleteEvent.ies[0];
+                   staInfo.assoc_req_ies_len = iesLen;
+-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,0,31))
++#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 0, 0))
++                  /* 
++                   * After Kernel 4.0, it's no longer need to set
++                   * STATION_INFO_ASSOC_REQ_IES flag, as it
++                   * changed to use assoc_req_ies_len length to 
++                   * check the existance of request IE.
++                   */
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,0,31)) || defined(WITH_BACKPORTS)
+                   staInfo.filled |= STATION_INFO_ASSOC_REQ_IES;
+ #endif
++#endif
+                   cfg80211_new_sta(dev,
+                         (const u8 *)&pSapEvent->sapevt.sapStationAssocReassocCompleteEvent.staMac.bytes[0],
+                         &staInfo, GFP_KERNEL);
+@@ -3245,14 +3259,29 @@
+ */
+ 
+ int
+-static iw_softap_disassoc_sta(struct net_device *dev,
++static __iw_softap_disassoc_sta(struct net_device *dev,
+                         struct iw_request_info *info,
+                         union iwreq_data *wrqu, char *extra)
+ {
+     hdd_adapter_t *pHostapdAdapter = (netdev_priv(dev));
++    hdd_context_t *hdd_ctx;
+     v_U8_t *peerMacAddr;
++    struct tagCsrDelStaParams delStaParams;
++    int ret;
+ 
+     ENTER();
++
++    if (!capable(CAP_NET_ADMIN)) {
++        VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
++                 FL("permission check failed"));
++        return -EPERM;
++    }
++
++    hdd_ctx = WLAN_HDD_GET_CTX(pHostapdAdapter);
++    ret = wlan_hdd_validate_context(hdd_ctx);
++    if (0 != ret)
++        return ret;
++
+     /* iwpriv tool or framework calls this ioctl with
+      * data passed in extra (less than 16 octets);
+      */
+@@ -3260,12 +3289,33 @@
+ 
+     hddLog(LOG1, "%s data "  MAC_ADDRESS_STR,
+            __func__, MAC_ADDR_ARRAY(peerMacAddr));
+-    hdd_softap_sta_disassoc(pHostapdAdapter, peerMacAddr);
++
++
++    WLANSAP_PopulateDelStaParams(peerMacAddr,
++                   eSIR_MAC_DEAUTH_LEAVING_BSS_REASON,
++                   (SIR_MAC_MGMT_DISASSOC >> 4),
++                   &delStaParams);
++
++    hdd_softap_sta_disassoc(pHostapdAdapter, &delStaParams);
+     EXIT();
+     return 0;
+ }
+ 
+ int
++static iw_softap_disassoc_sta(struct net_device *dev,
++                              struct iw_request_info *info,
++                              union iwreq_data *wrqu, char *extra)
++{
++	int ret;
++
++	vos_ssr_protect(__func__);
++	ret = __iw_softap_disassoc_sta(dev, info, wrqu, extra);
++	vos_ssr_unprotect(__func__);
++
++	return ret;
++}
++
++int
+ static iw_softap_ap_stats(struct net_device *dev,
+                         struct iw_request_info *info,
+                         union iwreq_data *wrqu, char *extra)
+@@ -5483,7 +5533,10 @@
+     return status;
+ }
+ 
+-hdd_adapter_t* hdd_wlan_create_ap_dev( hdd_context_t *pHddCtx, tSirMacAddr macAddr, tANI_U8 *iface_name )
++hdd_adapter_t* hdd_wlan_create_ap_dev( hdd_context_t *pHddCtx, 
++                                        tSirMacAddr macAddr, 
++                                        unsigned char name_assign_type,
++                                        tANI_U8 *iface_name )
+ {
+     struct net_device *pWlanHostapdDev = NULL;
+     hdd_adapter_t *pHostapdAdapter = NULL;
+@@ -5491,7 +5544,12 @@
+ 
+    hddLog(VOS_TRACE_LEVEL_DEBUG, "%s: iface_name = %s", __func__, iface_name);
+ 
+-   pWlanHostapdDev = alloc_netdev_mq(sizeof(hdd_adapter_t), iface_name, ether_setup, NUM_TX_QUEUES);
++   pWlanHostapdDev = alloc_netdev_mq(sizeof(hdd_adapter_t), iface_name, 
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,17,0)) || defined(WITH_BACKPORTS)
++                                    name_assign_type,
++#endif
++                                    ether_setup, 
++                                    NUM_TX_QUEUES);
+ 
+     if (pWlanHostapdDev != NULL)
+     {
+diff -urN qcacld-new.orig/CORE/HDD/src/wlan_hdd_main.c qcacld-new/CORE/HDD/src/wlan_hdd_main.c
+--- qcacld-new.orig/CORE/HDD/src/wlan_hdd_main.c	2016-07-06 04:57:55.000000000 +0800
++++ qcacld-new/CORE/HDD/src/wlan_hdd_main.c	2016-07-06 14:32:11.808346964 +0800
+@@ -269,7 +269,9 @@
+ void hdd_set_wlan_suspend_mode(bool suspend);
+ 
+ v_U16_t hdd_select_queue(struct net_device *dev,
+-    struct sk_buff *skb);
++    struct sk_buff *skb
++    , void *accel_priv
++    , select_queue_fallback_t fallback);
+ 
+ #ifdef WLAN_FEATURE_PACKET_FILTERING
+ static void hdd_set_multicast_list(struct net_device *dev);
+@@ -2639,7 +2641,9 @@
+    int ret = 0;
+    tpSirMacVendorSpecificFrameHdr pVendorSpecific =
+                    (tpSirMacVendorSpecificFrameHdr) payload;
+-
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,14,0)) || defined(WITH_BACKPORTS)
++   struct cfg80211_mgmt_tx_params params;
++#endif
+    pHddStaCtx = WLAN_HDD_GET_STATION_CTX_PTR(pAdapter);
+    pHddCtx = WLAN_HDD_GET_CTX(pAdapter);
+ 
+@@ -2717,17 +2721,28 @@
+    vos_mem_copy(hdr->addr3, bssid, VOS_MAC_ADDR_SIZE);
+    vos_mem_copy(hdr + 1, payload, payload_len);
+ 
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,14,0)) || defined(WITH_BACKPORTS)
++   params.chan = &chan;
++   params.offchan = 0;
++   params.wait = dwell_time;
++   params.buf = frame;
++   params.len = frame_len;
++   params.no_cck = 1;
++   params.dont_wait_for_ack = 1;
++   ret = wlan_hdd_mgmt_tx(NULL, &pAdapter->wdev, &params, &cookie);
++#else
+    ret = wlan_hdd_mgmt_tx(NULL,
+-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,6,0))
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,6,0)) || defined(WITH_BACKPORTS)
+                          &(pAdapter->wdev),
+ #else
+                          pAdapter->dev,
+ #endif
+                          &chan, 0,
+-#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,8,0))
++#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,8,0)) && !defined(WITH_BACKPORTS)
+                          NL80211_CHAN_HT20, 1,
+ #endif
+                          dwell_time, frame, frame_len, 1, 1, &cookie );
++#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(3,14,0)*/
+    vos_mem_free(frame);
+  exit:
+    return ret;
+@@ -7920,14 +7935,17 @@
+       pWlanDev->netdev_ops = &wlan_drv_ops;
+ }
+ 
+-static hdd_adapter_t* hdd_alloc_station_adapter( hdd_context_t *pHddCtx, tSirMacAddr macAddr, const char* name )
++static hdd_adapter_t* hdd_alloc_station_adapter( hdd_context_t *pHddCtx, 
++                                                tSirMacAddr macAddr, 
++                                                unsigned char name_assign_type,
++                                                const char* name )
+ {
+    struct net_device *pWlanDev = NULL;
+    hdd_adapter_t *pAdapter = NULL;
+    /*
+     * cfg80211 initialization and registration....
+     */
+-   pWlanDev = alloc_netdev_mq(sizeof( hdd_adapter_t ), name, ether_setup, NUM_TX_QUEUES);
++   pWlanDev = alloc_netdev_mq(sizeof( hdd_adapter_t ), name, name_assign_type, ether_setup, NUM_TX_QUEUES);
+ 
+    if(pWlanDev != NULL)
+    {
+@@ -8624,6 +8642,7 @@
+ 
+ hdd_adapter_t* hdd_open_adapter( hdd_context_t *pHddCtx, tANI_U8 session_type,
+                                  const char *iface_name, tSirMacAddr macAddr,
++                                 unsigned char name_assign_type,
+                                  tANI_U8 rtnl_held )
+ {
+    hdd_adapter_t *pAdapter = NULL;
+@@ -8682,7 +8701,9 @@
+       case WLAN_HDD_P2P_CLIENT:
+       case WLAN_HDD_P2P_DEVICE:
+       {
+-         pAdapter = hdd_alloc_station_adapter( pHddCtx, macAddr, iface_name );
++         pAdapter = hdd_alloc_station_adapter( pHddCtx, macAddr, 
++                                                name_assign_type,
++                                                iface_name );
+ 
+          if( NULL == pAdapter )
+          {
+@@ -8747,7 +8768,9 @@
+       case WLAN_HDD_P2P_GO:
+       case WLAN_HDD_SOFTAP:
+       {
+-         pAdapter = hdd_wlan_create_ap_dev( pHddCtx, macAddr, (tANI_U8 *)iface_name );
++         pAdapter = hdd_wlan_create_ap_dev( pHddCtx, macAddr, 
++                                            name_assign_type,
++                                            (tANI_U8 *)iface_name );
+          if( NULL == pAdapter )
+          {
+             hddLog(VOS_TRACE_LEVEL_FATAL,
+@@ -8779,7 +8802,9 @@
+       }
+       case WLAN_HDD_MONITOR:
+       {
+-         pAdapter = hdd_alloc_station_adapter( pHddCtx, macAddr, iface_name );
++         pAdapter = hdd_alloc_station_adapter( pHddCtx, macAddr, 
++                                               name_assign_type,
++                                               iface_name );
+          if( NULL == pAdapter )
+          {
+             hddLog(VOS_TRACE_LEVEL_FATAL,
+@@ -8814,7 +8839,9 @@
+          break;
+       case WLAN_HDD_FTM:
+       {
+-         pAdapter = hdd_alloc_station_adapter( pHddCtx, macAddr, iface_name );
++         pAdapter = hdd_alloc_station_adapter( pHddCtx, macAddr, 
++                                               name_assign_type,
++                                               iface_name );
+ 
+          if( NULL == pAdapter )
+          {
+@@ -10279,7 +10306,9 @@
+ 
+   --------------------------------------------------------------------------*/
+ v_U16_t hdd_select_queue(struct net_device *dev,
+-    struct sk_buff *skb)
++    struct sk_buff *skb
++    , void *accel_priv
++    , select_queue_fallback_t fallback)
+ {
+    return hdd_wmm_select_queue(dev, skb);
+ }
+@@ -11153,6 +11182,23 @@
+ #define WOW_MAX_PATTERN_SIZE     64
+ #endif
+ 
++
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,11,0)) || defined(WITH_BACKPORTS)
++static const struct wiphy_wowlan_support wowlan_support_reg_init = {
++    .flags = WIPHY_WOWLAN_ANY |
++             WIPHY_WOWLAN_MAGIC_PKT |
++             WIPHY_WOWLAN_DISCONNECT |
++             WIPHY_WOWLAN_SUPPORTS_GTK_REKEY |
++             WIPHY_WOWLAN_GTK_REKEY_FAILURE |
++             WIPHY_WOWLAN_EAP_IDENTITY_REQ |
++             WIPHY_WOWLAN_4WAY_HANDSHAKE |
++             WIPHY_WOWLAN_RFKILL_RELEASE,
++    .n_patterns = WOW_MAX_FILTER_LISTS * WOW_MAX_FILTERS_PER_LIST,
++    .pattern_min_len = WOW_MIN_PATTERN_SIZE,
++    .pattern_max_len = WOW_MAX_PATTERN_SIZE,
++};
++#endif
++
+ static VOS_STATUS wlan_hdd_reg_init(hdd_context_t *hdd_ctx)
+ {
+    struct wiphy *wiphy;
+@@ -11177,6 +11223,9 @@
+ #endif
+ 
+ #ifdef QCA_WIFI_2_0
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,11,0)) || defined(WITH_BACKPORTS)
++   wiphy->wowlan = &wowlan_support_reg_init;
++#else 
+     wiphy->wowlan.flags = WIPHY_WOWLAN_ANY |
+                           WIPHY_WOWLAN_MAGIC_PKT |
+                           WIPHY_WOWLAN_DISCONNECT |
+@@ -11191,7 +11240,7 @@
+     wiphy->wowlan.pattern_min_len = WOW_MIN_PATTERN_SIZE;
+     wiphy->wowlan.pattern_max_len = WOW_MAX_PATTERN_SIZE;
+ #endif
+-
++#endif
+    /* registration of wiphy dev with cfg80211 */
+    if (0 > wlan_hdd_cfg80211_register(wiphy))
+    {
+@@ -12045,7 +12094,7 @@
+ #endif
+ 
+    pAdapter = hdd_open_adapter( pHddCtx, WLAN_HDD_INFRA_STATION, "wlan%d",
+-       wlan_hdd_get_intf_addr(pHddCtx), rtnl_lock_enable );
++       wlan_hdd_get_intf_addr(pHddCtx), NET_NAME_UNKNOWN, rtnl_lock_enable );
+ 
+ #ifdef WLAN_OPEN_P2P_INTERFACE
+    /* Open P2P device interface */
+@@ -12080,7 +12129,9 @@
+       }
+ 
+       pP2pAdapter = hdd_open_adapter( pHddCtx, WLAN_HDD_P2P_DEVICE, "p2p%d",
+-                        &pHddCtx->p2pDeviceAddress.bytes[0], rtnl_lock_enable );
++                        &pHddCtx->p2pDeviceAddress.bytes[0], 
++                        NET_NAME_UNKNOWN,
++                        rtnl_lock_enable );
+ 
+       if ( NULL == pP2pAdapter )
+       {
+@@ -13071,7 +13122,8 @@
+ 
+   --------------------------------------------------------------------------*/
+ 
+-VOS_STATUS hdd_softap_sta_deauth(hdd_adapter_t *pAdapter, v_U8_t *pDestMacAddress)
++VOS_STATUS hdd_softap_sta_deauth(hdd_adapter_t *pAdapter,
++                                 struct tagCsrDelStaParams *pDelStaParams)
+ {
+ #ifndef WLAN_FEATURE_MBSSID
+     v_CONTEXT_t pVosContext = (WLAN_HDD_GET_CTX(pAdapter))->pvosContext;
+@@ -13084,13 +13136,14 @@
+            (WLAN_HDD_GET_CTX(pAdapter))->pvosContext);
+ 
+     //Ignore request to deauth bcmc station
+-    if( pDestMacAddress[0] & 0x1 )
++    if (pDelStaParams->peerMacAddr[0] & 0x1)
+        return vosStatus;
+ 
+ #ifdef WLAN_FEATURE_MBSSID
+-    vosStatus = WLANSAP_DeauthSta(WLAN_HDD_GET_SAP_CTX_PTR(pAdapter), pDestMacAddress);
++    vosStatus = WLANSAP_DeauthSta(WLAN_HDD_GET_SAP_CTX_PTR(pAdapter),
++                                  pDelStaParams);
+ #else
+-    vosStatus = WLANSAP_DeauthSta(pVosContext, pDestMacAddress);
++    vosStatus = WLANSAP_DeauthSta(pVosContext, pDelStaParams);
+ #endif
+ 
+     EXIT();
+@@ -13111,7 +13164,8 @@
+ 
+   --------------------------------------------------------------------------*/
+ 
+-void hdd_softap_sta_disassoc(hdd_adapter_t *pAdapter,v_U8_t *pDestMacAddress)
++void hdd_softap_sta_disassoc(hdd_adapter_t *pAdapter,
++                             struct tagCsrDelStaParams *pDelStaParams)
+ {
+ #ifndef WLAN_FEATURE_MBSSID
+     v_CONTEXT_t pVosContext = (WLAN_HDD_GET_CTX(pAdapter))->pvosContext;
+@@ -13122,13 +13176,13 @@
+     hddLog( LOGE, "hdd_softap_sta_disassoc:(%p, false)", (WLAN_HDD_GET_CTX(pAdapter))->pvosContext);
+ 
+     //Ignore request to disassoc bcmc station
+-    if( pDestMacAddress[0] & 0x1 )
++    if( pDelStaParams->peerMacAddr[0] & 0x1 )
+        return;
+ 
+ #ifdef WLAN_FEATURE_MBSSID
+-    WLANSAP_DisassocSta(WLAN_HDD_GET_SAP_CTX_PTR(pAdapter), pDestMacAddress);
++    WLANSAP_DisassocSta(WLAN_HDD_GET_SAP_CTX_PTR(pAdapter), pDelStaParams);
+ #else
+-    WLANSAP_DisassocSta(pVosContext,pDestMacAddress);
++    WLANSAP_DisassocSta(pVosContext, pDelStaParams);
+ #endif
+ }
+ 
+@@ -13460,8 +13514,12 @@
+           * the driver.
+           *
+           */
+-
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,11,0)) || defined(WITH_BACKPORTS)
++         cfg80211_rx_unprot_mlme_mgmt(pAdapterNode->pAdapter->dev,
++                                        (u_int8_t*)mgmt, len);
++#else
+          cfg80211_send_unprot_deauth(pAdapterNode->pAdapter->dev, (u_int8_t*)mgmt, len );
++#endif
+       }
+       status = hdd_get_next_adapter ( pHddCtx, pAdapterNode, &pNext );
+       pAdapterNode = pNext;
+diff -urN qcacld-new.orig/CORE/HDD/src/wlan_hdd_p2p.c qcacld-new/CORE/HDD/src/wlan_hdd_p2p.c
+--- qcacld-new.orig/CORE/HDD/src/wlan_hdd_p2p.c	2016-07-06 04:57:55.000000000 +0800
++++ qcacld-new/CORE/HDD/src/wlan_hdd_p2p.c	2016-07-06 14:32:11.820346965 +0800
+@@ -1701,7 +1701,10 @@
+     return 0;
+ }
+ 
+-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,6,0))
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,14,0)) || defined(WITH_BACKPORTS)
++int wlan_hdd_mgmt_tx(struct wiphy *wiphy, struct wireless_dev *wdev,
++                     struct cfg80211_mgmt_tx_params *params, u64 *cookie)
++#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(3,6,0))
+ int wlan_hdd_mgmt_tx(struct wiphy *wiphy, struct wireless_dev *wdev,
+                      struct ieee80211_channel *chan, bool offchan,
+ #if (LINUX_VERSION_CODE < KERNEL_VERSION(3,8,0))
+@@ -1729,7 +1732,12 @@
+     int ret;
+ 
+     vos_ssr_protect(__func__);
+-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,6,0))
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,14,0)) || defined(WITH_BACKPORTS)
++    ret = __wlan_hdd_mgmt_tx(wiphy, wdev, params->chan, params->offchan,
++                             params->wait, params->buf, params->len,
++                             params->no_cck, params->dont_wait_for_ack,
++                             cookie);
++#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(3,6,0))
+     ret = __wlan_hdd_mgmt_tx(wiphy, wdev, chan, offchan,
+ #if (LINUX_VERSION_CODE < KERNEL_VERSION(3,8,0))
+                              channel_type, channel_type_valid,
+@@ -2117,8 +2125,13 @@
+ 
+     return sessionType;
+ }
+-
+-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,7,0))
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4,0,0))
++struct wireless_dev* __wlan_hdd_add_virtual_intf(
++                  struct wiphy *wiphy, const char *name,
++                  unsigned char name_assign_type,
++                  enum nl80211_iftype type,
++                  u32 *flags, struct vif_params *params )
++#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(3,7,0))
+ struct wireless_dev* __wlan_hdd_add_virtual_intf(
+                   struct wiphy *wiphy, const char *name,
+                   enum nl80211_iftype type,
+@@ -2179,15 +2192,16 @@
+              */
+             v_MACADDR_t p2pDeviceAddress = pHddCtx->p2pDeviceAddress;
+             p2pDeviceAddress.bytes[4] ^= 0x80;
+-            pAdapter = hdd_open_adapter( pHddCtx,
++	    pAdapter = hdd_open_adapter( pHddCtx,
+                                          wlan_hdd_get_session_type(type),
+                                          name, p2pDeviceAddress.bytes,
++                                         name_assign_type,
+                                          VOS_TRUE );
+     }
+     else
+     {
+        pAdapter = hdd_open_adapter( pHddCtx, wlan_hdd_get_session_type(type),
+-                          name, wlan_hdd_get_intf_addr(pHddCtx), VOS_TRUE );
++                          name, wlan_hdd_get_intf_addr(pHddCtx), name_assign_type, VOS_TRUE );
+     }
+ 
+     if( NULL == pAdapter)
+@@ -2203,7 +2217,34 @@
+ #endif
+ }
+ 
+-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,7,0))
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 1, 0))
++/**
++ * wlan_hdd_add_virtual_intf() - Add virtual interface wrapper
++ * @wiphy: wiphy pointer
++ * @name: User-visible name of the interface
++ * @name_assign_type: the name of assign type of the netdev
++ * @nl80211_iftype: (virtual) interface types
++ * @flags: monitor mode configuration flags (not used)
++ * @vif_params: virtual interface parameters (not used)
++ *
++ * Return: the pointer of wireless dev, otherwise NULL.
++ */
++struct wireless_dev *wlan_hdd_add_virtual_intf(struct wiphy *wiphy,
++                                               const char *name,
++                                               unsigned char name_assign_type,
++                                               enum nl80211_iftype type,
++                                               u32 *flags,
++                                               struct vif_params *params)
++{
++    struct wireless_dev *wdev;
++
++    vos_ssr_protect(__func__);
++    wdev = __wlan_hdd_add_virtual_intf(wiphy, name, name_assign_type,
++                                       type, flags, params);
++    vos_ssr_unprotect(__func__);
++    return wdev;
++}
++#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(3,7,0)) || defined(WITH_BACKPORTS)
+ struct wireless_dev* wlan_hdd_add_virtual_intf(
+                   struct wiphy *wiphy, const char *name,
+                   enum nl80211_iftype type,
+diff -urN qcacld-new.orig/CORE/HDD/src/wlan_hdd_softap_tx_rx.c qcacld-new/CORE/HDD/src/wlan_hdd_softap_tx_rx.c
+--- qcacld-new.orig/CORE/HDD/src/wlan_hdd_softap_tx_rx.c	2016-07-06 04:57:55.000000000 +0800
++++ qcacld-new/CORE/HDD/src/wlan_hdd_softap_tx_rx.c	2016-07-06 14:32:11.820346965 +0800
+@@ -266,7 +266,7 @@
+   @return         : NET_XMIT_DROP if packets are dropped
+                   : NET_XMIT_SUCCESS if packet is enqueued succesfully
+   ===========================================================================*/
+-int hdd_softap_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
++netdev_tx_t hdd_softap_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
+ {
+    VOS_STATUS status;
+    WLANTL_ACEnumType ac = WLANTL_AC_BE;
+@@ -555,7 +555,7 @@
+ 
+   @return         : NETDEV_TX_OK
+   ===========================================================================*/
+-int hdd_softap_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
++netdev_tx_t hdd_softap_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
+ {
+    WLANTL_ACEnumType ac  = WLANTL_AC_BE;
+    hdd_adapter_t *pAdapter = (hdd_adapter_t *)netdev_priv(dev);
+diff -urN qcacld-new.orig/CORE/HDD/src/wlan_hdd_tx_rx.c qcacld-new/CORE/HDD/src/wlan_hdd_tx_rx.c
+--- qcacld-new.orig/CORE/HDD/src/wlan_hdd_tx_rx.c	2016-07-06 04:57:55.000000000 +0800
++++ qcacld-new/CORE/HDD/src/wlan_hdd_tx_rx.c	2016-07-06 14:32:11.824346965 +0800
+@@ -357,7 +357,7 @@
+    struct sk_buff* skb;
+    hdd_adapter_t* pMonAdapter = NULL;
+    struct ieee80211_hdr *hdr;
+-
++   struct tagCsrDelStaParams DelStaParams;
+    if (pAdapter == NULL)
+    {
+       VOS_TRACE( VOS_MODULE_ID_HDD_DATA, VOS_TRACE_LEVEL_ERROR,
+@@ -411,16 +411,18 @@
+    if( (hdr->frame_control & HDD_FRAME_TYPE_MASK)
+                                        == HDD_FRAME_TYPE_MGMT )
+    {
++       vos_mem_copy(DelStaParams.peerMacAddr, hdr->addr1, 6);
+        if( (hdr->frame_control & HDD_FRAME_SUBTYPE_MASK)
+                                        == HDD_FRAME_SUBTYPE_DEAUTH )
+        {
+-          hdd_softap_sta_deauth( pAdapter, hdr->addr1 );
++          hdd_softap_sta_deauth( pAdapter, &DelStaParams);
+           goto mgmt_handled;
+        }
+        else if( (hdr->frame_control & HDD_FRAME_SUBTYPE_MASK)
+                                       == HDD_FRAME_SUBTYPE_DISASSOC )
+        {
+-          hdd_softap_sta_disassoc( pAdapter, hdr->addr1 );
++          
++          hdd_softap_sta_disassoc( pAdapter, &DelStaParams);
+           goto mgmt_handled;
+        }
+    }
+@@ -549,7 +551,7 @@
+ 
+       skb->protocol = htons(HDD_ETHERTYPE_802_1_X);
+ 
+-      hdd_hostapd_select_queue(pPgBkAdapter->dev, skb);
++      hdd_hostapd_select_queue(pPgBkAdapter->dev, skb, NULL, NULL);
+       return hdd_softap_hard_start_xmit( skb, pPgBkAdapter->dev );
+    }
+    else
+@@ -934,7 +936,7 @@
+   @return         : NET_XMIT_DROP if packets are dropped
+                   : NET_XMIT_SUCCESS if packet is enqueued succesfully
+   ===========================================================================*/
+-int hdd_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
++netdev_tx_t hdd_hard_start_xmit(struct sk_buff *skb, struct net_device *dev)
+ {
+    VOS_STATUS status;
+    WLANTL_ACEnumType ac;
+diff -urN qcacld-new.orig/CORE/HDD/src/wlan_hdd_wmm.c qcacld-new/CORE/HDD/src/wlan_hdd_wmm.c
+--- qcacld-new.orig/CORE/HDD/src/wlan_hdd_wmm.c	2016-07-06 04:57:55.000000000 +0800
++++ qcacld-new/CORE/HDD/src/wlan_hdd_wmm.c	2016-07-06 14:32:11.824346965 +0800
+@@ -1865,7 +1865,10 @@
+ 
+   @return         : Qdisc queue index
+   ===========================================================================*/
+-v_U16_t hdd_hostapd_select_queue(struct net_device * dev, struct sk_buff *skb)
++u16 hdd_hostapd_select_queue(struct net_device * dev, struct sk_buff *skb
++                                , void *accel_priv
++                                , select_queue_fallback_t fallback
++)
+ {
+    WLANTL_ACEnumType ac;
+    sme_QosWmmUpType up = SME_QOS_WMM_UP_BE;
+diff -urN qcacld-new.orig/CORE/MAC/inc/wniApi.h qcacld-new/CORE/MAC/inc/wniApi.h
+--- qcacld-new.orig/CORE/MAC/inc/wniApi.h	2016-07-06 04:57:55.000000000 +0800
++++ qcacld-new/CORE/MAC/inc/wniApi.h	2016-07-06 14:32:11.824346965 +0800
+@@ -416,6 +416,12 @@
+ 
+     eWNI_SME_TSF_EVENT,
+     eWNI_SME_GET_RSSI_IND,
++    eWNI_SME_ROAM_SCAN_OFFLOAD_REQ,
++    eWNI_SME_SMPS_FORCE_MODE_IND,
++    eWNI_SME_REGISTER_MGMT_FRAME_CB,
++    eWNI_SME_MON_INIT_SESSION,
++    eWNI_SME_DEL_ALL_TDLS_PEERS,
++    eWNI_SME_SEND_DISASSOC_FRAME,
+     eWNI_SME_MSG_TYPES_END
+ };
+ 
+diff -urN qcacld-new.orig/CORE/SAP/inc/sapApi.h qcacld-new/CORE/SAP/inc/sapApi.h
+--- qcacld-new.orig/CORE/SAP/inc/sapApi.h	2016-07-06 04:57:55.000000000 +0800
++++ qcacld-new/CORE/SAP/inc/sapApi.h	2016-07-06 14:32:11.824346965 +0800
+@@ -1150,7 +1150,7 @@
+ WLANSAP_DisassocSta
+ (
+     v_PVOID_t pvosGCtx,
+-    v_U8_t *pPeerStaMac
++    struct tagCsrDelStaParams *pDelStaParams
+ );
+ 
+ /*==========================================================================
+@@ -1179,7 +1179,7 @@
+ WLANSAP_DeauthSta
+ (
+     v_PVOID_t pvosGCtx,
+-    v_U8_t *pPeerStaMac
++    struct tagCsrDelStaParams *pDelStaParams
+ );
+ 
+ /*==========================================================================
+@@ -2160,6 +2160,31 @@
+ VOS_STATUS
+ WLANSAP_Set_DfsNol(v_PVOID_t pSapCtx, eSapDfsNolType conf);
+ 
++/*==========================================================================
++  FUNCTION    WLANSAP_PopulateDelStaParams
++
++  DESCRIPTION
++  This API is used to populate del station parameters
++  DEPENDENCIES
++  NA.
++
++  PARAMETERS
++  IN
++  mac:           pointer to peer mac address.
++  reason_code:   Reason code for the disassoc/deauth.
++  subtype:       subtype points to either disassoc/deauth frame.
++  pDelStaParams: address where parameters to be populated.
++
++  RETURN VALUE NONE
++
++  SIDE EFFECTS
++============================================================================*/
++
++void WLANSAP_PopulateDelStaParams(const v_U8_t *mac,
++                                  v_U16_t reason_code,
++                                  v_U8_t subtype,
++                                  struct tagCsrDelStaParams *pDelStaParams);
++
+ #ifdef __cplusplus
+  }
+ #endif
+diff -urN qcacld-new.orig/CORE/SAP/src/sapModule.c qcacld-new/CORE/SAP/src/sapModule.c
+--- qcacld-new.orig/CORE/SAP/src/sapModule.c	2016-07-06 04:57:55.000000000 +0800
++++ qcacld-new/CORE/SAP/src/sapModule.c	2016-07-06 14:32:11.824346965 +0800
+@@ -74,6 +74,7 @@
+ #include "sapInternal.h"
+ #include "smeInside.h"
+ 
++#include "csrApi.h"
+ /*----------------------------------------------------------------------------
+  * Preprocessor Definitions and Constants
+  * -------------------------------------------------------------------------*/
+@@ -1211,7 +1212,8 @@
+     eSapBool staInWhiteList=eSAP_FALSE, staInBlackList=eSAP_FALSE;
+     v_U8_t staWLIndex, staBLIndex;
+     ptSapContext  pSapCtx = VOS_GET_SAP_CB(pCtx);
+-
++    
++    struct tagCsrDelStaParams DelStaParams;
+     if (NULL == pSapCtx)
+     {
+        VOS_TRACE( VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_ERROR,
+@@ -1286,8 +1288,9 @@
+                 {
+                     VOS_TRACE( VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_INFO, "Delete from white list");
+                     sapRemoveMacFromACL(pSapCtx->acceptMacList, &pSapCtx->nAcceptMac, staWLIndex);
++                    vos_mem_copy(DelStaParams.peerMacAddr, pPeerStaMac, 6);
+                     /* If a client is deleted from white list and the client is connected, send deauth*/
+-                    WLANSAP_DeauthSta(pSapCtx, pPeerStaMac);
++                    WLANSAP_DeauthSta(pSapCtx, &DelStaParams);
+                     VOS_TRACE( VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_INFO_LOW, "size of accept and deny lists %d %d",
+                             pSapCtx->nAcceptMac, pSapCtx->nDenyMac);
+                 }
+@@ -1335,8 +1338,9 @@
+                                 "Present in white list so first remove from it");
+                         sapRemoveMacFromACL(pSapCtx->acceptMacList, &pSapCtx->nAcceptMac, staWLIndex);
+                     }
++                    vos_mem_copy(DelStaParams.peerMacAddr, pPeerStaMac, 6);
+                     /* If we are adding a client to the black list; if its connected, send deauth */
+-                    WLANSAP_DeauthSta(pSapCtx, pPeerStaMac);
++                    WLANSAP_DeauthSta(pSapCtx, &DelStaParams);
+                     VOS_TRACE( VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_INFO,
+                             "... Now add to black list");
+                     sapAddMacToACL(pSapCtx->denyMacList, &pSapCtx->nDenyMac, pPeerStaMac);
+@@ -1412,11 +1416,12 @@
+ WLANSAP_DisassocSta
+ (
+     v_PVOID_t pCtx,
+-    v_U8_t *pPeerStaMac
++    struct tagCsrDelStaParams *pDelStaParams
+ )
+ {
+     ptSapContext pSapCtx = VOS_GET_SAP_CB(pCtx);
+ 
++     v_U8_t *pPeerStaMac = pDelStaParams->peerMacAddr;
+     /*------------------------------------------------------------------------
+       Sanity check
+       Extract SAP control block
+@@ -1463,9 +1468,10 @@
+ WLANSAP_DeauthSta
+ (
+     v_PVOID_t pCtx,
+-    v_U8_t *pPeerStaMac
++    struct tagCsrDelStaParams *pDelStaParams
+ )
+ {
++    v_U8_t *pPeerStaMac = pDelStaParams->peerMacAddr;
+     eHalStatus halStatus = eHAL_STATUS_FAILURE;
+     VOS_STATUS vosStatus = VOS_STATUS_E_FAULT;
+     ptSapContext pSapCtx = VOS_GET_SAP_CB(pCtx);
+@@ -3431,3 +3437,51 @@
+ 
+     return VOS_STATUS_SUCCESS;
+ }
++
++/*==========================================================================
++  FUNCTION    WLANSAP_PopulateDelStaParams
++
++  DESCRIPTION
++  This API is used to populate del station parameters
++  DEPENDENCIES
++  NA.
++
++  PARAMETERS
++  IN
++  mac:           pointer to peer mac address.
++  reason_code:   Reason code for the disassoc/deauth.
++  subtype:       subtype points to either disassoc/deauth frame.
++  pDelStaParams: address where parameters to be populated.
++
++  RETURN VALUE NONE
++
++  SIDE EFFECTS
++============================================================================*/
++void WLANSAP_PopulateDelStaParams(const v_U8_t *mac,
++                                  v_U16_t reason_code,
++                                  v_U8_t subtype,
++                                  struct tagCsrDelStaParams *pDelStaParams)
++{
++        if (NULL == mac)
++            memset(pDelStaParams->peerMacAddr, 0xff, VOS_MAC_ADDR_SIZE);
++        else
++            vos_mem_copy(pDelStaParams->peerMacAddr, mac, VOS_MAC_ADDR_SIZE);
++
++        if (reason_code == 0)
++            pDelStaParams->reason_code = eSIR_MAC_DEAUTH_LEAVING_BSS_REASON;
++        else
++            pDelStaParams->reason_code = reason_code;
++
++        if (subtype == (SIR_MAC_MGMT_DEAUTH >> 4) ||
++            subtype == (SIR_MAC_MGMT_DISASSOC >> 4))
++            pDelStaParams->subtype = subtype;
++        else
++            pDelStaParams->subtype = (SIR_MAC_MGMT_DEAUTH >> 4);
++
++        VOS_TRACE(VOS_MODULE_ID_SAP, VOS_TRACE_LEVEL_INFO,
++               FL("Delete STA with RC:%hu subtype:%hhu MAC::" MAC_ADDRESS_STR),
++                   pDelStaParams->reason_code, pDelStaParams->subtype,
++                   MAC_ADDR_ARRAY(pDelStaParams->peerMacAddr));
++}
++
++
+diff -urN qcacld-new.orig/CORE/SERVICES/COMMON/osdep_adf.h qcacld-new/CORE/SERVICES/COMMON/osdep_adf.h
+--- qcacld-new.orig/CORE/SERVICES/COMMON/osdep_adf.h	2016-07-06 04:57:55.000000000 +0800
++++ qcacld-new/CORE/SERVICES/COMMON/osdep_adf.h	2016-07-06 14:32:11.824346965 +0800
+@@ -161,7 +161,7 @@
+ #define mark_bh(a)
+ 
+ #define ATH_SYSCTL_DECL(f, ctl, write, filp, buffer, lenp, ppos) \
+-    f(ctl_table *ctl, int write, void *buffer,                   \
++    f(struct ctl_table *ctl, int write, void *buffer,                   \
+         size_t *lenp, loff_t *ppos)
+ #define ATH_SYSCTL_PROC_DOINTVEC(ctl, write, filp, buffer, lenp, ppos) \
+     proc_dointvec(ctl, write, buffer, lenp, ppos)
+diff -urN qcacld-new.orig/CORE/SME/inc/csrApi.h qcacld-new/CORE/SME/inc/csrApi.h
+--- qcacld-new.orig/CORE/SME/inc/csrApi.h	2016-07-06 04:57:55.000000000 +0800
++++ qcacld-new/CORE/SME/inc/csrApi.h	2016-07-06 14:32:11.824346965 +0800
+@@ -1559,6 +1559,12 @@
+ }tCsrHandoffRequest;
+ #endif
+ 
++struct tagCsrDelStaParams
++{
++    tCsrBssid peerMacAddr;
++    u16 reason_code;
++    u8 subtype;
++};
+ #if defined(FEATURE_WLAN_ESE) && defined(FEATURE_WLAN_ESE_UPLOAD)
+ typedef struct tagCsrEseBeaconReqParams
+ {
+diff -urN qcacld-new.orig/CORE/SME/inc/sme_Api.h qcacld-new/CORE/SME/inc/sme_Api.h
+--- qcacld-new.orig/CORE/SME/inc/sme_Api.h	2016-07-06 04:57:55.000000000 +0800
++++ qcacld-new/CORE/SME/inc/sme_Api.h	2016-07-06 14:32:11.824346965 +0800
+@@ -4139,5 +4139,27 @@
+ #ifdef WLAN_FEATURE_WOW_PULSE
+ VOS_STATUS sme_set_wow_pulse(struct wow_pulse_mode *wow_pulse_set_info);
+ #endif
++/* *
++ * struct sme_send_disassoc_frm_req - send disassoc request frame
++ * @msg_type: message type
++ * @length: length of message
++ * @session_id: session id
++ * @trans_id: transaction id
++ * @peer_mac: peer mac address
++ * @reason: reason for disassoc
++ * @wait_for_ack: wait for acknowledgment
++ */
++struct sme_send_disassoc_frm_req
++{
++    uint16_t msg_type;
++    uint16_t length;
++    uint8_t session_id;
++    uint16_t trans_id;
++    uint8_t peer_mac[6];
++    uint16_t reason;
++    uint8_t wait_for_ack;
++};
+ 
++void sme_send_disassoc_req_frame(tHalHandle hal, uint8_t session_id,
++		uint8_t *peer_mac, tANI_U16 reason, uint8_t wait_for_ack);
+ #endif //#if !defined( __SME_API_H )
+diff -urN qcacld-new.orig/CORE/SME/src/sme_common/sme_Api.c qcacld-new/CORE/SME/src/sme_common/sme_Api.c
+--- qcacld-new.orig/CORE/SME/src/sme_common/sme_Api.c	2016-07-06 04:57:55.000000000 +0800
++++ qcacld-new/CORE/SME/src/sme_common/sme_Api.c	2016-07-06 14:32:11.828346965 +0800
+@@ -14766,3 +14766,70 @@
+ }
+ #endif
+ 
++/**
++ * sme_send_disassoc_req_frame - send disassoc req
++ * @hal: handler to hal
++ * @session_id: session id
++ * @peer_mac: peer mac address
++ * @reason: reason for disassociation
++ * wait_for_ack: wait for acknowledgment
++ *
++ * function to send disassoc request to lim
++ *
++ * return: none
++ */
++void sme_send_disassoc_req_frame(tHalHandle hal, uint8_t session_id,
++	uint8_t *peer_mac, uint16_t reason, uint8_t wait_for_ack)
++{
++	struct sme_send_disassoc_frm_req *msg;
++	eHalStatus status = eHAL_STATUS_SUCCESS;
++	tpAniSirGlobal p_mac = PMAC_STRUCT(hal);
++	tANI_U8 *buf;
++	tANI_U16 tmp;
++
++	msg = vos_mem_malloc(sizeof(struct sme_send_disassoc_frm_req));
++
++	if (NULL == msg)
++		status = eHAL_STATUS_FAILURE;
++	else
++		status = eHAL_STATUS_SUCCESS;
++	if (!HAL_STATUS_SUCCESS(status))
++		return;
++
++	vos_mem_set(msg, sizeof(struct sme_send_disassoc_frm_req), 0);
++	msg->msg_type = pal_cpu_to_be16((tANI_U16)eWNI_SME_SEND_DISASSOC_FRAME);
++
++	msg->length =
++	    pal_cpu_to_be16((tANI_U16)sizeof(struct sme_send_disassoc_frm_req));
++
++	buf = &msg->session_id;
++
++	/* session id */
++	*buf = (tANI_U8) session_id;
++	buf += sizeof(tANI_U8);
++
++	/* transaction id */
++	*buf = 0;
++	*(buf + 1) = 0;
++	buf += sizeof(tANI_U16);
++
++	/* Set the peer MAC address before sending the message to LIM */
++	vos_mem_copy(buf, peer_mac, VOS_MAC_ADDR_SIZE);
++
++	buf += VOS_MAC_ADDR_SIZE;
++
++	/* reasoncode */
++	tmp = pal_cpu_to_be16(reason);
++	vos_mem_copy(buf, &tmp, sizeof(tANI_U16));
++	buf += sizeof(tANI_U16);
++
++	*buf =  wait_for_ack;
++	buf += sizeof(tANI_U8);
++
++	status = palSendMBMessage(p_mac->hHdd, msg );
++
++	if(status != eHAL_STATUS_SUCCESS)
++		VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_ERROR,
++			FL("palSendMBMessage Failed"));
++}
++
+diff -urN qcacld-new.orig/CORE/UTILS/PKTLOG/linux_ac.c qcacld-new/CORE/UTILS/PKTLOG/linux_ac.c
+--- qcacld-new.orig/CORE/UTILS/PKTLOG/linux_ac.c	2016-07-06 04:57:55.000000000 +0800
++++ qcacld-new/CORE/UTILS/PKTLOG/linux_ac.c	2016-07-06 14:32:11.828346965 +0800
+@@ -50,6 +50,7 @@
+ 
+ #define PKTLOG_PROC_DIR		"ath_pktlog"
+ 
++struct ctl_table;
+ /* Permissions for creating proc entries */
+ #define PKTLOG_PROC_PERM	0444
+ #define PKTLOG_PROCSYS_DIR_PERM	0555
+@@ -578,7 +579,7 @@
+ 	int fold_offset, ppos_data, cur_rd_offset;
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
+ 	struct ath_pktlog_info *pl_info = (struct ath_pktlog_info *)
+-					  PDE_DATA(file->f_dentry->d_inode);
++					  PDE_DATA(file->f_path.dentry->d_inode);
+ #else
+ 	struct proc_dir_entry *proc_entry = PDE(file->f_dentry->d_inode);
+ 	struct ath_pktlog_info *pl_info = (struct ath_pktlog_info *)
+@@ -819,7 +820,7 @@
+ {
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(3,10,0)
+ 	struct ath_pktlog_info *pl_info = (struct ath_pktlog_info *)
+-					  PDE_DATA(file->f_dentry->d_inode);
++					  PDE_DATA(file->f_path.dentry->d_inode);
+ #else
+ 	struct proc_dir_entry *proc_entry = PDE(file->f_dentry->d_inode);
+ 	struct ath_pktlog_info *pl_info = (struct ath_pktlog_info *)
+diff -urN qcacld-new.orig/CORE/VOSS/inc/i_vos_event.h qcacld-new/CORE/VOSS/inc/i_vos_event.h
+--- qcacld-new.orig/CORE/VOSS/inc/i_vos_event.h	2016-07-06 04:57:55.000000000 +0800
++++ qcacld-new/CORE/VOSS/inc/i_vos_event.h	2016-07-06 14:32:11.828346965 +0800
+@@ -42,6 +42,7 @@
+   Include Files
+   ------------------------------------------------------------------------*/
+ #include <vos_types.h>
++#include <linux/version.h>
+ #include <linux/completion.h>
+ 
+ /*--------------------------------------------------------------------------
+@@ -52,6 +53,10 @@
+ #ifdef __cplusplus
+ extern "C" {
+ #endif /* __cplusplus */
++
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,14,0)) 
++#define INIT_COMPLETION(event) reinit_completion(&event)
++#endif
+ /*--------------------------------------------------------------------------
+   Type declarations
+   ------------------------------------------------------------------------*/
+diff -urN qcacld-new.orig/CORE/VOSS/inc/vos_utils.h qcacld-new/CORE/VOSS/inc/vos_utils.h
+--- qcacld-new.orig/CORE/VOSS/inc/vos_utils.h	2016-07-06 04:57:55.000000000 +0800
++++ qcacld-new/CORE/VOSS/inc/vos_utils.h	2016-07-06 14:32:11.828346965 +0800
+@@ -65,6 +65,7 @@
+ #define VOS_CHAN_SPACING_20MHZ 20
+ #define VOS_CHAN_14_FREQ       2484
+ #define VOS_CHAN_15_FREQ       2512
++
+ /*--------------------------------------------------------------------------
+   Type declarations
+   ------------------------------------------------------------------------*/
+diff -urN qcacld-new.orig/CORE/VOSS/src/vos_nvitem.c qcacld-new/CORE/VOSS/src/vos_nvitem.c
+--- qcacld-new.orig/CORE/VOSS/src/vos_nvitem.c	2016-07-06 04:57:55.000000000 +0800
++++ qcacld-new/CORE/VOSS/src/vos_nvitem.c	2016-07-06 14:32:11.828346965 +0800
+@@ -58,6 +58,11 @@
+ #define IEEE80211_CHAN_NO_80MHZ		1<<7
+ #endif
+ 
++#if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,14,0)) || defined(WITH_BACKPORTS)
++#define IEEE80211_CHAN_PASSIVE_SCAN IEEE80211_CHAN_NO_IR
++#define IEEE80211_CHAN_NO_IBSS IEEE80211_CHAN_NO_IR
++#endif
++
+ #ifdef CONFIG_ENABLE_LINUX_REG
+ 
+ static v_REGDOMAIN_t cur_reg_domain = REGDOMAIN_COUNT;
+@@ -972,17 +977,17 @@
+ 
+    if  (pHddCtx->cfg_ini->fRegChangeDefCountry) {
+        regd = vos_custom_world_regdomain();
+-       wiphy->flags |= WIPHY_FLAG_CUSTOM_REGULATORY;
++       wiphy->regulatory_flags |= REGULATORY_CUSTOM_REG;
+    }
+    else if (is_world_regd(reg->reg_domain))
+    {
+        regd = vos_world_regdomain(reg);
+-       wiphy->flags |= WIPHY_FLAG_CUSTOM_REGULATORY;
++       wiphy->regulatory_flags |= REGULATORY_CUSTOM_REG;
+    }
+    else
+    {
+        regd = vos_default_world_regdomain();
+-       wiphy->flags |= WIPHY_FLAG_STRICT_REGULATORY;
++       wiphy->regulatory_flags |= REGULATORY_STRICT_REG;
+    }
+    wiphy_apply_custom_regulatory(wiphy, regd);
+    vos_reg_apply_radar_flags(wiphy);
+@@ -2070,7 +2075,7 @@
+             if (0 == err)
+ #endif
+             {
+-                if  (wiphy->flags & WIPHY_FLAG_CUSTOM_REGULATORY) {
++                if  (wiphy->regulatory_flags & REGULATORY_CUSTOM_REG) {
+ 
+                     if (!(reg_rule->flags & NL80211_RRF_PASSIVE_SCAN))
+                     {
+@@ -2484,18 +2489,18 @@
+         /* default country is world roaming */
+ 
+         reg_domain = REGDOMAIN_WORLD;
+-        wiphy->flags |= WIPHY_FLAG_CUSTOM_REGULATORY;
++        wiphy->regulatory_flags |= REGULATORY_CUSTOM_REG;
+     }
+     else if (REGDOMAIN_WORLD ==
+ 	     pnvEFSTable->halnv.tables.defaultCountryTable.regDomain) {
+ 
+         reg_domain = pnvEFSTable->halnv.tables.defaultCountryTable.regDomain;
+-        wiphy->flags |= WIPHY_FLAG_CUSTOM_REGULATORY;
++        wiphy->regulatory_flags |= REGULATORY_CUSTOM_REG;
+     }
+     else {
+ 
+         reg_domain = pnvEFSTable->halnv.tables.defaultCountryTable.regDomain;
+-        wiphy->flags |= WIPHY_FLAG_STRICT_REGULATORY;
++        wiphy->regulatory_flags |= REGULATORY_STRICT_REG;
+     }
+     m = 0;
+     for (i = 0; i < IEEE80211_NUM_BANDS; i++)
+diff -urN qcacld-new.orig/CORE/VOSS/src/vos_utils.c qcacld-new/CORE/VOSS/src/vos_utils.c
+--- qcacld-new.orig/CORE/VOSS/src/vos_utils.c	2016-07-06 04:57:55.000000000 +0800
++++ qcacld-new/CORE/VOSS/src/vos_utils.c	2016-07-06 14:32:11.828346965 +0800
+@@ -74,6 +74,7 @@
+ #endif
+ #include <errno.h>
+ 
++#include "i_vos_event.h"
+ #include "ieee80211_common.h"
+ #include "sirDebug.h"
+ /*----------------------------------------------------------------------------

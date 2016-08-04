@@ -1,0 +1,74 @@
+# Build list
+
+SHELL := /bin/bash
+targetList := bt_target
+
+default: ${targetList}
+
+#################################################################################################################################
+export BSP_PATCH_FILE_TOPDIR=${ATH_TOPDIR}/drivers/patches
+export BT_PATCH_FILE_TOPDIR=${BSP_PATCH_FILE_TOPDIR}/${BOARD_TYPE}/BT
+export BUILD_OUTPUT_BT_DIR=${ATH_TOPDIR}/build/out/BT
+
+
+bt_clean_src:
+	@echo rm the bluedroid/ hardware/xxx vendor/qcom
+	cd ${CUST_PROJ_PATH} && \
+	rm -rf external/bluetooth/bluedroid && \
+	rm -rf hardware/qcom/bt && \
+	rm -rf vendor/qcom
+#	tar cfz external/bluetooth/bluedroid.bak.tar.gz external/bluetooth/bluedroid && \
+#	tar cfz hardware/qcom/bt.bak.tar.gz hardware/qcom/bt && \
+#	tar cfz vendor/qcom.bak.tar.gz vendor/qcom && \
+#	mv hardware/libhardware/include/hardware/bluetooth.h hardware/libhardware/include/hardware/bluetooth.bak.h && \
+#	mv device/qcom/common/bdroid_buildcfg.h device/qcom/common/bdroid_buildcfg.bak.h && \
+
+bt_prepare_codebase: bt_clean_src
+	@echo prepare bluedroid codebase
+	tar xvf ${BT_PATCH_FILE_TOPDIR}/bluedroid.tar.gz -C ${CUST_PROJ_PATH}/external/bluetooth/
+	@echo prepare bluedroid codebase done
+	@echo prepare hardware bt codebase
+	tar xvf ${BT_PATCH_FILE_TOPDIR}/hardware.tar.gz -C ${CUST_PROJ_PATH}/ hardware/qcom/bt
+	tar xvf ${BT_PATCH_FILE_TOPDIR}/hardware.tar.gz -C ${CUST_PROJ_PATH}/ hardware/libhardware/include/hardware/bluetooth.h
+	@echo prepare hardware bt codebase done
+	@echo prepare vendor bt codebase
+	tar xvf ${BT_PATCH_FILE_TOPDIR}/vendor.tar.gz -C ${CUST_PROJ_PATH}/ vendor/qcom
+	@echo prepare vendor bt codebase done
+	@echo prepare bdroid_buildcfg.h 
+	cp ${BT_PATCH_FILE_TOPDIR}/bdroid_buildcfg.h ${CUST_PROJ_PATH}/device/qcom/common
+	@echo prepare bdroid_buildcfg.h done
+
+bt_cp_patch: bt_prepare_codebase
+	@echo copy Bluetooth patch to workspace
+	cp ${BT_PATCH_FILE_TOPDIR}/bluedroid.patch ${CUST_PROJ_PATH}/external/bluetooth/bluedroid
+	cp ${BSP_PATCH_FILE_TOPDIR}/bt_host_ver.h ${BT_PATCH_FILE_TOPDIR}/
+	cp ${BT_PATCH_FILE_TOPDIR}/bt_host_ver.h ${CUST_PROJ_PATH}/external/bluetooth/bluedroid/include
+	cp ${BT_PATCH_FILE_TOPDIR}/hardware.patch ${CUST_PROJ_PATH}/hardware/libhardware/include/hardware
+	@echo copy Bluetooth patch done	
+
+bt_patch_bluedroid:
+	@echo patch bluedroid
+	cd ${CUST_PROJ_PATH}/external/bluetooth/bluedroid && \
+	patch -p1 < bluedroid.patch
+	@echo patch bluedroid done
+
+bt_patch_hardware:
+	@echo patch hardware
+	cd ${CUST_PROJ_PATH}/hardware/libhardware/include/hardware && \
+	patch -p4 < hardware.patch
+	@echo patch hardware done
+	
+bt_target: bt_cp_patch bt_patch_bluedroid bt_patch_hardware
+	@echo build android bluetooth user components
+	cd ${CUST_PROJ_PATH} && \
+	source build/envsetup.sh && \
+	lunch 29 && \
+	cd external/bluetooth/bluedroid && mma && \
+	cd ${CUST_PROJ_PATH} && \
+	mmm vendor/qcom/proprietary/bt/wcnss_filter
+	mkdir -p ${BUILD_OUTPUT_BT_DIR}
+	cp ${CUST_PROJ_PATH}/out/target/product/msm8994/obj_arm/lib/bluetooth.default.so ${BUILD_OUTPUT_BT_DIR}/
+	cp ${CUST_PROJ_PATH}/out/target/product/msm8994/obj_arm/lib/libbt*.so ${BUILD_OUTPUT_BT_DIR}/
+	cp ${CUST_PROJ_PATH}/out/target/product/msm8994/obj/EXECUTABLES/wcnss_filter_intermediates/wcnss_filter ${BUILD_OUTPUT_BT_DIR}/
+	@echo build android-x86 bluetooth user components done
+

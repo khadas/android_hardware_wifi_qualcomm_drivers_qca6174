@@ -1,0 +1,10 @@
+--- Kbuild.orig	2016-06-29 18:07:56.138324379 +0800
++++ Kbuild	2016-06-29 18:07:13.618817195 +0800
+@@ -1361,6 +1361,7 @@
+ #Enable FTM support
+ ifeq ($(CONFIG_QCA_WIFI_FTM), 1)
+ CDEFINES += -DQCA_WIFI_FTM
++CDEFINES += -DCONFIG_NL80211_TESTMODE
+ endif
+ 
+ #Enable Checksum Offload support

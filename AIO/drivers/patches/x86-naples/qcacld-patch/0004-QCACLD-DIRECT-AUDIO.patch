@@ -1,0 +1,1076 @@
+diff --git a/CORE/HDD/inc/qc_sap_ioctl.h b/CORE/HDD/inc/qc_sap_ioctl.h
+index ef97045..ca88d08 100644
+--- a/CORE/HDD/inc/qc_sap_ioctl.h
++++ b/CORE/HDD/inc/qc_sap_ioctl.h
+@@ -268,6 +268,7 @@ enum {
+     QCASAP_SET_RADAR_DBG,
+     QCSAP_DBGLOG_FWLOG_FILE_ENABLE,
+     QCSAP_DBGLOG_FWLOG_FILE_MAX_SIZE,
++    QCSAP_DIRECT_AUDIO_TEST,
+ };
+ 
+ int iw_get_channel_list(struct net_device *dev,
+diff --git a/CORE/HDD/inc/wlan_hdd_direct_audio.h b/CORE/HDD/inc/wlan_hdd_direct_audio.h
+new file mode 100644
+index 0000000..a2ea049
+--- /dev/null
++++ b/CORE/HDD/inc/wlan_hdd_direct_audio.h
+@@ -0,0 +1,161 @@
++#ifdef DIRECT_AUDIO_SUPPORT
++#ifndef SDA_H
++#define SDA_H
++
++/* direct audio prototype */
++
++typedef struct SDA_Descriptor
++{
++	unsigned char m_ReadyToCopy;
++	unsigned int m_PayloadSize;
++	unsigned int m_TimeStamp;
++}__attribute__((packed)) SDA_Descriptor_t;
++
++
++typedef struct SDA_HeadRoom
++{
++	unsigned char m_DestAddress[6];
++	unsigned char m_SourceAddress[6];
++	unsigned short m_PacketType;
++}__attribute__((packed)) SDA_HeadRoom_t;
++
++
++typedef struct
++{
++	SDA_Descriptor_t   m_Descriptor;
++	unsigned char m_Dummy[50 - sizeof(struct SDA_HeadRoom)];
++	SDA_HeadRoom_t  m_Headroom;
++}__attribute__((packed)) SDA_Header_t;
++
++
++
++/**
++ * @brief Retrieve the time stamp value from the p2p0 or wlan0 interface
++ * @remarks
++ * @param vif_id : get time stamp from wlan0/p2p0(0/1)interface
++ * @return time stamp value (64bits)
++ * @see
++ */
++unsigned long long SDA_getTsf (unsigned char vif_id);
++
++
++
++
++/**
++ * @brief Synchronize p2p0s time stamp value with wlan0s
++ * @remarks
++ * @param none
++ * @return 0 : success, - 1 : fail
++ * @see
++ */
++int SDA_syncTsf (void);
++
++
++
++/**
++ * @brief tsf wifi module
++ * @remarks
++ * @param pTsf : tsf
++ * @return none
++ * @see
++ */
++void SDA_GetTSF(unsigned int *pTsf);
++
++
++
++
++/**
++ * @brief send the buffer info to wifi module for tx.
++ * @remarks
++ * @param BufferId is the mazimum 5.
++ * @param pBufferTotal : buffer address
++ * @param BufferTotalSize : buffer size
++ * @param BufferUnitSize : each unit size (descriptor + headroom + audio data size)
++ * @param HeadroomSize : head room size
++ * @return none
++ * @see
++ */
++void SDA_setSharedMemory4Send(unsigned int BufferId, unsigned char *pBufferTotal, unsigned int BufferTotalSize, unsigned int BufferUnitSize, unsigned int HeadroomSize);
++
++
++
++
++
++/**
++ * @brief send the buffer info to wifi module for rx.
++ * @remarks
++ * @param pBufferTotal : buffer address
++ * @param BufferTotalSize : buffer size
++ * @param BufferUnitSize : each unit size (descriptor + headroom + audio data size)
++ * @param HeadroomSize : head room size
++ * @return none
++ * @see
++ */
++void SDA_setSharedMemory4Recv(unsigned char *pBufferTotal, unsigned int BufferTotalSize, unsigned int BufferUnitSize, unsigned int HeadroomSize);
++
++
++
++
++
++
++/*
++ * @send the brief data data to wifi module (dsp --> wifi module)
++ * @remarks
++ * @param on BufferId direct audio system, the maximum of audio input buffer is 5. bufferÀÇ idÀÓ.
++ * @param pBuffer : buffer address
++ * @param BufferSize : buffer size
++ * @return none
++ * @see
++ */
++void SDA_function4Send(unsigned int BufferId, unsigned char *pBuffer, unsigned int BufferSize);
++
++
++
++
++/**
++ * @brief after sending data on wifi module, call the callback(ack) (wifi module --> dsp)
++ * @remarks
++ * @param on BufferId direct audio system, the maximum of audio input buffer is 5.
++ * @param pBuffer : buffer address
++ * @param BufferSize : buffer size
++ * @return none
++ * @see
++ */
++typedef void (*SDA_SendDoneCallBack)(unsigned int BufferId, unsigned char *pBuffer, unsigned int BufferSize);
++
++void SDA_registerCallback4SendDone(SDA_SendDoneCallBack pCallback);
++
++
++
++
++
++
++
++/**
++ * @brief on wifi module, send the receiving data to soc (wifi module --> dsp)
++ * @remarks
++ * @param pBuffer : buffer address
++ * @param BufferSize : buffer size
++ * @return none
++ * @see
++ */
++typedef void (*SDA_RecvCallBack)(unsigned char *pBuffer, unsigned int BufferSize);
++
++void SDA_registerCallback4Recv(SDA_RecvCallBack pCallback);
++
++
++
++
++
++/**
++ * @brief after finishing to received data on soc, notifying to wifi module(ack)
++ * @remarks
++ * @param pBuffer : buffer address
++ * @param BufferSize : buffer size
++ * @return none
++ * @see
++ */
++void SDA_function4RecvDone(unsigned char *pBuffer, unsigned int BufferSize);
++
++#endif // SDA_H
++#endif //DIRECT_AUDIO_SUPPORT
+diff --git a/CORE/HDD/src/wlan_hdd_direct_audio.c b/CORE/HDD/src/wlan_hdd_direct_audio.c
+new file mode 100644
+index 0000000..72b04d8
+--- /dev/null
++++ b/CORE/HDD/src/wlan_hdd_direct_audio.c
+@@ -0,0 +1,658 @@
++#include <wlan_hdd_includes.h>
++#include <vos_api.h>
++#include <vos_sched.h>
++#include <linux/etherdevice.h>
++#include <linux/firmware.h>
++#include <wcnss_api.h>
++#include <wlan_hdd_tx_rx.h>
++#include <wlan_hdd_softap_tx_rx.h>
++#include <wniApi.h>
++#include <wlan_nlink_srv.h>
++#include <wlan_btc_svc.h>
++#include <wlan_hdd_cfg.h>
++#include <wlan_ptt_sock_svc.h>
++#include <dbglog_host.h>
++#include <wlan_logging_sock_svc.h>
++#include <wlan_hdd_wowl.h>
++#include <wlan_hdd_misc.h>
++#include <wlan_hdd_wext.h>
++#include "wlan_hdd_trace.h"
++#include "vos_types.h"
++#include "vos_trace.h"
++#include <net/addrconf.h>
++#include <linux/wireless.h>
++#include <net/cfg80211.h>
++#include <linux/inetdevice.h>
++#include <net/addrconf.h>
++#include <wlan_hdd_direct_audio.h>
++#include "ol_if_athvar.h"
++#include "hif.h"
++#if defined(HIF_PCI)
++#include "if_pci.h"
++#elif defined(HIF_USB)
++#include "if_usb.h"
++#elif defined(HIF_SDIO)
++#include "if_ath_sdio.h"
++#endif
++
++
++#ifdef DIRECT_AUDIO_SUPPORT
++#define SDA_DEBUG	1
++#define TSFDATASIZE	4
++
++#define DIRECT_AUDIO_LLC_TYPE 0x43FF
++#if SDA_DEBUG
++#define MAX_BUF_SIZE 1500 // bytes
++#define MAX_SHARE_MEM_ITEM	32
++#endif
++#define MAX_TX_POOL_ID 5
++
++struct Direct_Audio_Context {
++	u32		last_tx_process_time;
++	u32		max_tx_process_time;
++	u32		last_rx_process_time;
++	u32		max_rx_process_time;
++	hdd_context_t *pHddCtx;
++	u8		vif_id;
++};
++
++static struct Direct_Audio_Context	DA_context;
++SDA_SendDoneCallBack SDA_TX_DONE_CB = NULL;
++SDA_RecvCallBack SDA_RX_READY_CB = NULL;
++
++struct Direct_Audio_Setting_str {
++    u8  *pAddr;
++	u32 sizeTotal;
++	u32 lenUnit;
++	u32 lenHeadroom;
++	u8  *current_pAddr;
++}__packed;
++
++static struct Direct_Audio_Setting_str global_TX_DA_Setting[MAX_TX_POOL_ID];
++static struct Direct_Audio_Setting_str global_RX_DA_Setting;
++
++#define TX_DA_INIT_ADDR(id)   global_TX_DA_Setting[id].pAddr
++#define TX_DA_ADDR(id)        global_TX_DA_Setting[id].current_pAddr
++#define TX_DA_POOL_SIZE(id)   global_TX_DA_Setting[id].sizeTotal
++#define TX_DA_UNIT_LEN(id)    global_TX_DA_Setting[id].lenUnit
++#define TX_DA_HEAD_ROOM(id)   global_TX_DA_Setting[id].lenHeadroom
++
++static void Direct_Audio_Tx_Setting(u32 BufferId,
++                                    u8 *pAddr,
++                                    u32 sizeTotal,
++                                    u16 lenUnit,
++                                    u16 lenHeadroom)
++{
++	if(BufferId >= MAX_TX_POOL_ID)
++	{
++		VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,
++			"%s: BufferId %d excess MAX_TX_POOL_ID %d\n",
++                          __func__,
++                          BufferId,
++                          MAX_TX_POOL_ID);
++		return;
++	}
++	TX_DA_INIT_ADDR(BufferId) = pAddr;
++	TX_DA_ADDR(BufferId) = pAddr;
++	TX_DA_POOL_SIZE(BufferId) = sizeTotal;
++	TX_DA_UNIT_LEN(BufferId) = lenUnit;
++	TX_DA_HEAD_ROOM(BufferId) = lenHeadroom;
++	VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,
++		"%s[%d]BufferId=%d,pAddr=0%p,sizeTotal=%d,lenUnit=%d,lenHeadroom=%d\r\n",
++	        __func__, __LINE__, BufferId, pAddr, sizeTotal, lenUnit, lenHeadroom);
++}
++
++#define RX_DA_INIT_ADDR   global_RX_DA_Setting.pAddr
++#define RX_DA_ADDR        global_RX_DA_Setting.current_pAddr
++#define RX_DA_POOL_SIZE   global_RX_DA_Setting.sizeTotal
++#define RX_DA_UNIT_LEN    global_RX_DA_Setting.lenUnit
++#define RX_DA_HEAD_ROOM   global_RX_DA_Setting.lenHeadroom
++
++static void Direct_Audio_Rx_Setting(u8 *pAddr, u32 sizeTotal, u32 lenUnit, u32 lenHeadroom)
++{
++	RX_DA_INIT_ADDR = pAddr;
++	RX_DA_ADDR = pAddr;
++	RX_DA_POOL_SIZE = sizeTotal;
++	RX_DA_UNIT_LEN = lenUnit;
++	RX_DA_HEAD_ROOM = lenHeadroom;
++	VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,
++		"%s[%d] pAddr=0%p,sizeTotal=%d,lenUnit=%d,lenHeadroom=%d\r\n",
++	    __func__, __LINE__, pAddr, sizeTotal, lenUnit, lenHeadroom);
++}
++
++//SDA_SendDoneCallBack  SDA_TX_DONE_CB = NULL;
++#define SDA_BUF_READY(_desc)      	!!_desc->m_ReadyToCopy
++#define TX_SDA_INIT_ADDR			orig_data_p
++#define TX_SDA_ADDR 				descp_p
++#define TX_SDA_POOL_SIZE			BufferSize
++#define TX_SDA_UNIT_LEN(id)				TX_DA_UNIT_LEN(id)
++#define CLR_SDA_BUF_READY(_desc)  	_desc->m_ReadyToCopy = 0
++#define SET_SDA_BUF_READY(_desc)  	_desc->m_ReadyToCopy = 1
++static void SDA_Tx_fun( struct net_device *dev, u32 BufferId, u8 *pBuffer, u32 BufferSize)
++{
++	u8 *orig_data_p = pBuffer;
++	u8 *data_p = pBuffer;
++	u8 *descp_p = pBuffer;
++	struct SDA_Descriptor *tx_desc = (struct SDA_Descriptor *) data_p;
++	hdd_adapter_t * vif;
++	int status = 0;
++	vif = hdd_get_adapter_by_vdev(DA_context.pHddCtx, DA_context.vif_id);
++	if(!vif)
++		return;
++
++	if(BufferId >= MAX_TX_POOL_ID)
++	{
++		VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_WARN,
++			"%s: BufferId excess %d\n", __func__, MAX_TX_POOL_ID);
++		goto tx_fail;
++	}
++	if (!data_p || !SDA_BUF_READY(tx_desc)) {
++		//Should not into here
++		VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_WARN,
++			"%s: descriptor show not ready\n", __func__);
++		goto tx_fail;
++	}
++	/*Check descriptor*/
++	do {
++		struct sk_buff *skb;
++		int send_len = 0;
++		struct ethhdr *eth_hdr;
++		int alloc_size = 0;
++
++		/* point to RAW_Data
++		* Assume offset include Descriptor & Headroom
++		*/
++		data_p += sizeof(SDA_Header_t);
++		/*Create skb, copy data, fill skb header*/
++		alloc_size = tx_desc->m_PayloadSize+sizeof(struct ethhdr);
++		skb = adf_nbuf_alloc(NULL, alloc_size, 0, sizeof(u_int32_t), 0);
++		if (skb == NULL) {
++			//should not happened
++			VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
++				"%s: Allocate skb failed\n", __func__);
++			break;
++		}
++
++		skb_put(skb, alloc_size);
++		memset(skb->data, 0, alloc_size);
++		//Copy data from share buf to skb
++		memcpy(skb->data, data_p-sizeof(struct ethhdr),
++                       tx_desc->m_PayloadSize+sizeof(struct ethhdr));
++		send_len += tx_desc->m_PayloadSize+sizeof(struct ethhdr);
++
++		eth_hdr = (struct ethhdr *)(skb->data);
++
++		//copy mac address as source address
++		memcpy(eth_hdr->h_source,vif->dev->dev_addr,6);
++#if 0 //dest mac is filled by upper layer like virutal sound card
++		if (vif->device_mode == WLAN_HDD_INFRA_STATION || vif->device_mode == WLAN_HDD_P2P_CLIENT)
++		{
++			hdd_station_ctx_t *pHddStaCtx = WLAN_HDD_GET_STATION_CTX_PTR(vif);
++			memcpy(eth_hdr->h_dest, pHddStaCtx->conn_info.bssId, 6);
++		}
++		else
++		{
++			u8 broadcastpeer[6] = {0xff,0xff,0xff,0xff,0xff,0xff};
++			memcpy(eth_hdr->h_dest, broadcastpeer, 6);
++		}
++#endif
++		skb->protocol = ntohs(eth_hdr->h_proto);
++		skb->dev = dev;
++		skb->priority = SME_QOS_WMM_UP_VI;
++		skb->queue_mapping = hddLinuxUpToAcMap[skb->priority];
++
++		/*Adjust the length of data before send*/
++		skb_trim(skb, send_len);
++		//Call normal tx path
++		if (vif->device_mode == WLAN_HDD_INFRA_STATION ||
++                    vif->device_mode == WLAN_HDD_P2P_CLIENT)
++			status = hdd_hard_start_xmit(skb, dev);
++		else if (vif->device_mode == WLAN_HDD_SOFTAP ||
++                         vif->device_mode == WLAN_HDD_P2P_GO)
++			status = hdd_softap_hard_start_xmit(skb, dev);
++		else
++			status = hdd_softap_hard_start_xmit(skb, dev);
++		VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_LOW,
++			"%s[%d]BufferId=%d,audio len = %d,status = %d by %d\n",
++		        __func__, __LINE__, BufferId,
++                          tx_desc->m_PayloadSize,
++                          status,
++                          (vif->device_mode));
++		//Clear share buffer Ready flag
++		CLR_SDA_BUF_READY(tx_desc);
++		//To-do: call SS complete routine
++
++		//Next frame & check if need retrun pAddr of DA Share buff
++		if(((TX_SDA_ADDR - TX_SDA_INIT_ADDR)+TX_SDA_UNIT_LEN(BufferId)) >= TX_SDA_POOL_SIZE)
++                {
++			/*Return to Init buf addr*/
++			TX_SDA_ADDR = TX_SDA_INIT_ADDR;
++		} else {
++			/*Go to Next buf*/
++			TX_SDA_ADDR += TX_SDA_UNIT_LEN(BufferId);
++		}
++		data_p = TX_SDA_ADDR;
++		tx_desc = (struct SDA_Descriptor *) data_p;
++	} while(SDA_BUF_READY(tx_desc));//Check if having next
++tx_fail:
++	if (SDA_TX_DONE_CB)
++		SDA_TX_DONE_CB(BufferId,pBuffer,BufferSize);
++}
++
++/*Assume The RX Already to be Packet Mode*/
++void SDA_Rx_fun( struct net_device *dev, struct sk_buff *skb)
++{
++#if (!defined FILE_DEBUG) && (!defined UDPDBG) //call real DA engine
++    u32 tsf_ie=0, tsf_data=0;
++    u8 *data_p = RX_DA_ADDR;
++    struct SDA_Descriptor *rx_desc = (struct SDA_Descriptor *) data_p;
++
++    if (skb == NULL) {
++		VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_FATAL,
++			"%s: input buf should not be NULL\n", __func__);
++		return;
++	}
++#define TSF_IE 0x1234fedc
++	tsf_ie = le32_to_cpu(*((u32 *)(skb->data + skb->len - 2*sizeof(u32))));
++	if (tsf_ie == TSF_IE) {
++		skb_trim(skb, (skb->len - 2*sizeof(u32)));
++
++		tsf_data = le32_to_cpu(*((u32 *)(skb->data + skb->len + sizeof(u32))));
++		//printk("~~current-tsf (%x) \n",tsf_data);
++	}
++
++	if (!data_p) {
++		VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,
++			"%s: DSP dose not register rx pool\n", __func__);
++		dev_kfree_skb(skb);
++		return;
++	}
++
++	if(SDA_BUF_READY(rx_desc)) {
++	   //the share buf not available. DO NOT PUT PRINT LOG HERE.
++	   goto rx_fail;
++	}
++
++	//Fill derscriptort
++	rx_desc->m_PayloadSize = skb->len;//no ethernet header included and remove TSF_IE
++	rx_desc->m_TimeStamp = 0 ;
++
++	if (skb->len > (RX_DA_UNIT_LEN-sizeof(struct SDA_Descriptor)-RX_DA_HEAD_ROOM)) {
++	    //Should not happen
++		VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,
++			"%s: Not having enough room for RX DATA\n", __func__);
++		skb->len = RX_DA_UNIT_LEN-sizeof(struct SDA_Descriptor)-RX_DA_HEAD_ROOM;
++	}
++	//copy to share buf & Skip the length of "struct ethhdr"
++	memcpy((data_p + sizeof(struct SDA_Descriptor) + RX_DA_HEAD_ROOM) - sizeof(struct ethhdr),
++		skb->data -sizeof(struct ethhdr),
++		skb->len + sizeof(struct ethhdr));
++
++	// Set rx timestamp
++	memcpy(data_p + sizeof(struct SDA_Descriptor) + RX_DA_HEAD_ROOM +sizeof(u32),
++			&tsf_data, sizeof(u32));
++
++	//To-do: :Call SS Direct Audio RX routine
++	VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,
++		"%s[%d]audio len=%d\n\r",__func__,__LINE__,rx_desc->m_PayloadSize);
++
++	SET_SDA_BUF_READY(rx_desc);
++	if (SDA_RX_READY_CB)
++		SDA_RX_READY_CB((u8*)rx_desc,RX_DA_UNIT_LEN);
++
++	//Next DA Share buff
++	if(((RX_DA_ADDR - RX_DA_INIT_ADDR)+RX_DA_UNIT_LEN) >= RX_DA_POOL_SIZE ) {
++	    /*Return to Init buf addr*/
++	    RX_DA_ADDR = RX_DA_INIT_ADDR;
++	} else {
++	    /*Go to Next buf*/
++	    RX_DA_ADDR += RX_DA_UNIT_LEN;
++	}
++rx_fail:
++	dev_kfree_skb(skb);
++#endif
++}
++
++void SDA_function4Send(unsigned int BufferId, unsigned char *pBuffer, unsigned int BufferSize)
++{
++	hdd_adapter_t * vif;
++	hdd_station_ctx_t *pHddStaCtx;
++	hdd_ap_ctx_t *pAPCtx;
++
++	u32	entry_time;
++	if (DA_context.pHddCtx == NULL) {
++		VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_WARN,
++			"%s: DA_context.ar should not be NULL\n", __func__);
++		return;
++	}
++
++	vif = hdd_get_adapter_by_vdev(DA_context.pHddCtx, DA_context.vif_id);
++	if (!vif) {
++		VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_WARN,
++			"%s: Failed to find vif for DA, DA_context.ar=%p, DA_context.vif_id=%d\n"
++			, __func__,
++			DA_context.pHddCtx,
++			DA_context.vif_id);
++		return;
++	}
++	if (vif->device_mode == WLAN_HDD_INFRA_STATION || vif->device_mode == WLAN_HDD_P2P_CLIENT) {
++		pHddStaCtx = WLAN_HDD_GET_STATION_CTX_PTR(vif);
++		if (!pHddStaCtx || !hdd_connIsConnected(pHddStaCtx)) {
++			VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
++				"%s: STA %p is not connected\n", __func__, pHddStaCtx);
++			return;
++		}
++	}
++	if (vif->device_mode == WLAN_HDD_SOFTAP || vif->device_mode == WLAN_HDD_P2P_GO) {
++		pAPCtx = WLAN_HDD_GET_AP_CTX_PTR(vif);
++	}
++	entry_time = jiffies;
++	SDA_Tx_fun(vif->dev,BufferId,pBuffer,BufferSize);
++	DA_context.last_tx_process_time = jiffies - entry_time;
++
++	if (DA_context.max_tx_process_time < DA_context.last_tx_process_time)
++		DA_context.max_tx_process_time = DA_context.last_tx_process_time;
++}
++EXPORT_SYMBOL(SDA_function4Send);
++
++void SDA_function4RecvDone(unsigned char *pBuffer, unsigned int BufferSize)
++{
++	//what should we do in this API
++	VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,
++		"%s[%d]pBuffer=0x%p,BufferSize=%d\n\r",__func__,__LINE__,pBuffer,BufferSize);
++}
++EXPORT_SYMBOL(SDA_function4RecvDone);
++
++void SDA_setSharedMemory4Send(unsigned int BufferId,
++                                  unsigned char *pBufferTotal,
++                                  unsigned int BufferTotalSize,
++                                  unsigned int BufferUnitSize,
++                                  unsigned int HeadroomSize)
++{
++	Direct_Audio_Tx_Setting(BufferId,
++                                pBufferTotal,
++                                BufferTotalSize,
++                                BufferUnitSize,
++                                HeadroomSize);
++}
++EXPORT_SYMBOL(SDA_setSharedMemory4Send);
++
++void SDA_setSharedMemory4Recv(unsigned char *pBufferTotal,
++                                  unsigned int BufferTotalSize,
++                                  unsigned int BufferUnitSize,
++                                  unsigned int HeadroomSize)
++{
++	Direct_Audio_Rx_Setting(pBufferTotal,
++                                BufferTotalSize,
++                                BufferUnitSize,
++                                HeadroomSize);
++}
++EXPORT_SYMBOL(SDA_setSharedMemory4Recv);
++
++//Register callback which CLD notify DSP that CLD has received the audio packet
++void SDA_registerCallback4Recv(SDA_RecvCallBack pCallback)
++{
++	SDA_RX_READY_CB = pCallback;
++}
++EXPORT_SYMBOL(SDA_registerCallback4Recv);
++
++//Register callback which Mck notify DSP that Mck has sent the audio packet
++void SDA_registerCallback4SendDone(SDA_SendDoneCallBack pCallback)
++{
++	VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,
++		"%s[%d]\n\r",__func__,__LINE__);
++	SDA_TX_DONE_CB = pCallback;
++}
++EXPORT_SYMBOL(SDA_registerCallback4SendDone);
++
++void Direct_Audio_debug_dump(void)
++{
++	VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,"DA_context.pHddCtx = 0x%x\n\r",(int)DA_context.pHddCtx);
++	VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,"DA_context.last_tx_process_time = %u\n\r",DA_context.last_tx_process_time);
++	VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,"DA_context.max_tx_process_time = %u\n\r",DA_context.max_tx_process_time);
++	VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,"DA_context.last_rx_process_time = %u\n\r",DA_context.last_rx_process_time);
++	VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,"DA_context.max_rx_process_time = %u\n\r",DA_context.max_rx_process_time);
++}
++
++void Direct_Audio_init(hdd_context_t *pHddCtx)
++{
++	int i;
++
++	memset(&global_RX_DA_Setting, 0x0, sizeof(global_RX_DA_Setting));
++	for (i = 0; i < MAX_TX_POOL_ID; i++)
++	    memset(&global_TX_DA_Setting[i], 0x0, sizeof(global_TX_DA_Setting[0]));
++	VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,"%s[%d]\n\r",__func__,__LINE__);
++
++	memset(&DA_context,0x00,sizeof(DA_context));
++	DA_context.pHddCtx = pHddCtx;
++	DA_context.vif_id = 1;//use p2p0 as default
++}
++
++void Direct_Audio_deinit(hdd_context_t *pHddCtx)
++{
++	VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,"%s[%d]\n\r",__func__,__LINE__);
++}
++
++#if defined(HIF_USB)
++
++#define TSF_TO_TU(_h,_l)    ((((u64)(_h)) << 32) | ((u64)(_l)))
++#define REG_TSF_L 0x1054
++#define REG_TSF_H 0x1058
++#define REG_TSF2_L 0x10d4
++#define REG_TSF2_H 0x10d8
++
++
++void SDA_GetTSF(unsigned int *pTsf)
++{
++	*((u64 *)pTsf) = SDA_getTsf(0);
++}
++EXPORT_SYMBOL(SDA_GetTSF);
++
++unsigned long long SDA_getTsf (unsigned char vif_id)
++{
++	A_UINT32 datah = 0, datal = 0;
++	struct hif_usb_softc *sc;
++	struct ol_softc *pOlsc;
++	VosContextType *pHIFContext = NULL;
++	v_CONTEXT_t pVosContext = NULL;
++
++	if (DA_context.pHddCtx == NULL) {
++		VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_FATAL,
++			"%s: DA_context.ar should not be NULL\n", __func__);
++		return 0;
++	}
++
++	pVosContext = DA_context.pHddCtx->pvosContext;
++	pHIFContext = ((VosContextType*)pVosContext)->pHIFContext;
++	pOlsc = (struct ol_softc *)pHIFContext;
++	sc = pOlsc->hif_sc;
++
++	if (vif_id) {
++		HIFDiagReadAccess(sc->hif_device, REG_TSF2_H, &datah);
++		HIFDiagReadAccess(sc->hif_device, REG_TSF2_L, &datal);
++	} else {
++		HIFDiagReadAccess(sc->hif_device, REG_TSF_H, &datah);
++		HIFDiagReadAccess(sc->hif_device, REG_TSF_L, &datal);
++	}
++	return TSF_TO_TU(datah, datal);
++}
++EXPORT_SYMBOL(SDA_getTsf);
++
++int SDA_syncTsf (void)
++{
++	A_UINT32 datah = 0, datal = 0;
++	struct hif_usb_softc *sc;
++	struct ol_softc *pOlsc;
++	VosContextType *pHIFContext = NULL;
++	v_CONTEXT_t pVosContext = NULL;
++
++	if (DA_context.pHddCtx == NULL) {
++		VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_FATAL,
++			"%s: DA_context.ar should not be NULL\n", __func__);
++		return 0;
++	}
++
++	pVosContext = DA_context.pHddCtx->pvosContext;
++	pHIFContext = ((VosContextType*)pVosContext)->pHIFContext;
++	pOlsc = (struct ol_softc *)pHIFContext;
++	sc = pOlsc->hif_sc;
++
++	HIFDiagReadAccess(sc->hif_device, REG_TSF_L, &datal);
++	HIFDiagReadAccess(sc->hif_device, REG_TSF_H, &datah);
++
++	HIFDiagWriteAccess(sc->hif_device, REG_TSF2_L, datal);
++	HIFDiagWriteAccess(sc->hif_device, REG_TSF2_H, datah);
++
++	return 0;
++}
++EXPORT_SYMBOL(SDA_syncTsf);
++
++#endif /*HIF_USB*/
++
++#if SDA_DEBUG//debug use
++struct D_A_SHARE_MEM {
++    SDA_Header_t	desc;
++	u8				data[MAX_BUF_SIZE];
++};
++
++static void debug_tx_done_cb(unsigned int BufferId, unsigned char *pBuffer, unsigned int BufferSize)
++{
++	VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,
++			"%s[%d]BufferId=%d,pBuffer=0x%p,BufferSize=%d\n\r",
++	        __func__, __LINE__, BufferId, pBuffer, BufferSize);
++}
++
++#ifdef CONFIG_VOS_MEM_PRE_ALLOC
++static u8 gtxdebugbuf[(sizeof(SDA_Header_t)+MAX_BUF_SIZE)*MAX_SHARE_MEM_ITEM];
++static u8 grxdebugbuf[sizeof(struct D_A_SHARE_MEM)*MAX_SHARE_MEM_ITEM];
++#endif
++
++
++int Direct_Audio_TX_debug(void)
++{
++	u8	*buf;
++	u32 len,i,BufferSize;
++	u8	*ptr,*eth_ptr;
++	SDA_Descriptor_t *share_mem_ptr;
++	hdd_adapter_t * vif;
++
++	u8	test_peermac[6] = {0x02,0x03,0x7f,0x8b,0x18,0x93};
++	//u8	test_peermac[6] = {0xff,0xff,0xff,0xff,0xff,0xff};
++	struct ethhdr *eth_hdr;
++	u8 sendcount = 1;
++
++	VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
++		"%s[%d]Simulate TX behavior\n\r",__func__,__LINE__);
++	SDA_registerCallback4SendDone(debug_tx_done_cb);
++
++	len = (sizeof(SDA_Header_t)+MAX_BUF_SIZE)*MAX_SHARE_MEM_ITEM;
++#ifdef CONFIG_VOS_MEM_PRE_ALLOC
++	buf = (u8 *)gtxdebugbuf;
++#else
++	buf = kmalloc(len, GFP_ATOMIC);
++	if (!buf)
++		return -ENOMEM;
++#endif
++	SDA_setSharedMemory4Send(0, buf, len, sizeof(SDA_Header_t)+MAX_BUF_SIZE, 50);
++	ptr	= buf;
++	//construct tx share memory
++	vif = hdd_get_adapter_by_vdev(DA_context.pHddCtx, DA_context.vif_id);
++	if(!vif)
++		return -ENOMEM;
++
++
++
++	VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,
++			"peer %pM mac %pM\n", test_peermac, vif->dev->dev_addr);
++
++	memset(buf,0x00,len);
++	share_mem_ptr = (SDA_Descriptor_t *)buf;
++	BufferSize = 0;
++
++	for (i=0; i < sendcount; i++) {
++		//fill descript
++		share_mem_ptr->m_ReadyToCopy = 1;
++		share_mem_ptr->m_PayloadSize = 1024;
++		share_mem_ptr->m_TimeStamp = 0;
++		//fill ethernet header
++		eth_ptr = ptr+sizeof(SDA_Header_t)-sizeof(struct ethhdr);
++		eth_hdr = (struct ethhdr *)eth_ptr;
++		memcpy(eth_hdr->h_dest,test_peermac,6);
++		memcpy(eth_hdr->h_source,vif->dev->dev_addr,6);
++		eth_hdr->h_proto = htons(DIRECT_AUDIO_LLC_TYPE);
++		memset(ptr+sizeof(SDA_Header_t),0xa5,share_mem_ptr->m_PayloadSize);
++		BufferSize += sizeof(SDA_Header_t) + MAX_BUF_SIZE;
++		ptr = ptr + sizeof(SDA_Header_t) + MAX_BUF_SIZE;
++		share_mem_ptr = (SDA_Descriptor_t *)ptr;
++	}
++	VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO_HIGH,
++		"%s[%d]BufferId=%d,pBuffer=0x%p,BufferSize=%d\n\r",
++	    __func__, __LINE__, 0, buf, BufferSize);
++	//notify Direct Audio module to send packet
++	SDA_function4Send(0, buf, BufferSize);
++
++#ifndef CONFIG_VOS_MEM_PRE_ALLOC
++	kfree(buf);
++#endif
++#if defined(HIF_USB)
++	VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
++		"%s[%d]Simulate TX finish, wlan tsf %llu, p2p tsf %llu\n",
++		__func__,__LINE__, SDA_getTsf(0), SDA_getTsf(1));
++#endif
++
++	return 0;
++}
++
++static void debug_rx_ready_cb(unsigned char *pBuffer, unsigned int BufferSize)
++{
++	VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
++		"%s[%d]pBuffer=0x%p,BufferSize=%d\n\r",
++		__func__, __LINE__, pBuffer, BufferSize);
++}
++
++int Direct_Audio_RX_debug(void)
++{
++	u8	*buf;
++	u32 len;
++
++	if(RX_DA_INIT_ADDR) {
++		VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_WARN,
++			"%s[%d]already rx debug\n\r",__func__,__LINE__);
++	}
++	VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
++		"%s[%d]SimulateRX behavior\n\r",__func__,__LINE__);
++	len = sizeof(struct D_A_SHARE_MEM)*MAX_SHARE_MEM_ITEM;
++#ifdef CONFIG_VOS_MEM_PRE_ALLOC
++	buf = (u8 *)grxdebugbuf;
++#else
++	buf = kmalloc(len, GFP_ATOMIC);
++	if (!buf)
++		return -ENOMEM;
++#endif
++	//construct rx share memory
++	memset(buf,0x00,len);
++	VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
++		"%s[%d]buf=0x%p\n\r", __func__, __LINE__, buf);
++	SDA_setSharedMemory4Recv(buf, len, sizeof(struct D_A_SHARE_MEM), 50);
++	//Direct_Audio_RxReady_Notify_cb_Reg(debug_rx_ready_cb);
++	SDA_registerCallback4Recv(debug_rx_ready_cb);
++	VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
++		"%s[%d]Simulate RX finish\n\r",__func__,__LINE__);
++#ifndef CONFIG_VOS_MEM_PRE_ALLOC
++	kfree(buf);
++#endif
++	return 0;
++}
++#else
++int Direct_Audio_TX_debug(void)
++{
++	return 0;
++}
++
++int Direct_Audio_RX_debug(void)
++{
++	return 0;
++}
++#endif //if SDA_DEBUG
++
++#endif //end DIRECT_AUDIO_SUPPORT
+diff --git a/CORE/HDD/src/wlan_hdd_hostapd.c b/CORE/HDD/src/wlan_hdd_hostapd.c
+index 8e0e24c..adb58b9 100644
+--- a/CORE/HDD/src/wlan_hdd_hostapd.c
++++ b/CORE/HDD/src/wlan_hdd_hostapd.c
+@@ -2760,6 +2760,11 @@ static VOS_STATUS hdd_print_acl(hdd_adapter_t *pHostapdAdapter)
+     return VOS_STATUS_SUCCESS;
+ }
+ 
++#ifdef DIRECT_AUDIO_SUPPORT
++extern int Direct_Audio_TX_debug(unsigned int usbdbgtxtime);
++extern int Direct_Audio_RX_debug(void);
++#endif
++
+ int
+ static __iw_softap_setparam(struct net_device *dev,
+                             struct iw_request_info *info,
+@@ -3479,6 +3484,21 @@ static __iw_softap_setparam(struct net_device *dev,
+             ret = hdd_set_rx_stbc(pHostapdAdapter, set_value);
+             break;
+ 
++#ifdef DIRECT_AUDIO_SUPPORT
++        case QCSAP_DIRECT_AUDIO_TEST:
++            {
++                hddLog(LOGW, "%s: SAP Direct_Audio Test %s\n",
++                                  __func__, set_value ? "TX" : "RX");
++                if (set_value) {
++                  ret = Direct_Audio_TX_debug(0);
++                }
++                else {
++                  ret = Direct_Audio_RX_debug();
++                }
++                break;
++            }
++#endif
++
+         default:
+             hddLog(LOGE, FL("Invalid setparam command %d value %d"),
+                     sub_cmd, set_value);
+diff --git a/CORE/HDD/src/wlan_hdd_main.c b/CORE/HDD/src/wlan_hdd_main.c
+index 206f876..f8224be 100644
+--- a/CORE/HDD/src/wlan_hdd_main.c
++++ b/CORE/HDD/src/wlan_hdd_main.c
+@@ -171,6 +171,11 @@ void hdd_ch_avoid_cb(void *hdd_context,void *indi_param);
+ #define WLAN_TFC_IPAUC_TX_DESC_RESERVE   100
+ #endif /* IPA_UC_OFFLOAD */
+ 
++#ifdef DIRECT_AUDIO_SUPPORT
++extern void Direct_Audio_init(hdd_context_t *pHddCtx);
++extern void Direct_Audio_deinit(hdd_context_t *pHddCtx);
++#endif
++
+ /* the Android framework expects this param even though we don't use it */
+ #define BUF_LEN 20
+ static char fwpath_buffer[BUF_LEN];
+@@ -9301,6 +9306,10 @@ static void __hdd_uninit(struct net_device *dev)
+ 	if (dev != pAdapter->dev)
+ 		hddLog(LOGP, FL("Invalid device reference"));
+ 
++#ifdef DIRECT_AUDIO_SUPPORT
++	Direct_Audio_deinit(pAdapter->pHddCtx);
++#endif
++
+ 	hdd_deinit_adapter(pAdapter->pHddCtx, pAdapter, true);
+ 
+ 	/* After uninit our adapter structure will no longer be valid */
+@@ -9759,6 +9768,8 @@ static void __hdd_set_multicast_list(struct net_device *dev)
+          return;
+       }
+ 
++
++
+       pAdapter->mc_addr_list.mc_cnt = mc_count;
+ 
+       netdev_for_each_mc_addr(ha, dev) {
+@@ -15226,6 +15237,9 @@ err_free_hdd_context:
+    return -EIO;
+ 
+ success:
++#ifdef DIRECT_AUDIO_SUPPORT
++	Direct_Audio_init(pHddCtx);
++#endif
+    EXIT();
+    return 0;
+ }
+diff --git a/CORE/HDD/src/wlan_hdd_softap_tx_rx.c b/CORE/HDD/src/wlan_hdd_softap_tx_rx.c
+index 191d714..cede368 100644
+--- a/CORE/HDD/src/wlan_hdd_softap_tx_rx.c
++++ b/CORE/HDD/src/wlan_hdd_softap_tx_rx.c
+@@ -740,6 +740,9 @@ VOS_STATUS hdd_softap_deinit_tx_rx_sta ( hdd_adapter_t *pAdapter, v_U8_t STAId )
+   @return                : VOS_STATUS_E_FAILURE if any errors encountered,
+                          : VOS_STATUS_SUCCESS otherwise
+   ===========================================================================*/
++#ifdef DIRECT_AUDIO_SUPPORT
++extern void SDA_Rx_fun( struct net_device *dev, struct sk_buff *skb);
++#endif
+ VOS_STATUS hdd_softap_rx_packet_cbk(v_VOID_t *vosContext,
+                                     adf_nbuf_t rxBuf, v_U8_t staId)
+ {
+@@ -814,6 +817,13 @@ VOS_STATUS hdd_softap_rx_packet_cbk(v_VOID_t *vosContext,
+ 
+       skb->protocol = eth_type_trans(skb, skb->dev);
+ 
++#ifdef DIRECT_AUDIO_SUPPORT
++#define DIRECT_AUDIO_LLC_TYPE 0x43FF
++        if (skb->protocol == cpu_to_be16(DIRECT_AUDIO_LLC_TYPE)) {
++           SDA_Rx_fun(pAdapter->dev, skb);
++           rxstat = NET_RX_SUCCESS;
++        } else {
++#endif
+       /*
+        * If this is not a last packet on the chain
+        * Just put packet into backlog queue, not scheduling RX sirq
+@@ -832,6 +842,9 @@ VOS_STATUS hdd_softap_rx_packet_cbk(v_VOID_t *vosContext,
+           */
+          rxstat = netif_rx_ni(skb);
+       }
++#ifdef DIRECT_AUDIO_SUPPORT
++      }
++#endif
+ 
+       if (NET_RX_SUCCESS == rxstat)
+          ++pAdapter->hdd_stats.hddTxRxStats.rxDelivered[cpu_index];
+diff --git a/CORE/HDD/src/wlan_hdd_tx_rx.c b/CORE/HDD/src/wlan_hdd_tx_rx.c
+index a7427f1..e35496c 100644
+--- a/CORE/HDD/src/wlan_hdd_tx_rx.c
++++ b/CORE/HDD/src/wlan_hdd_tx_rx.c
+@@ -1098,6 +1098,9 @@ VOS_STATUS hdd_mon_rx_packet_cbk(v_VOID_t *vos_ctx, adf_nbuf_t rx_buf,
+   @return                : VOS_STATUS_E_FAILURE if any errors encountered,
+                          : VOS_STATUS_SUCCESS otherwise
+   ===========================================================================*/
++#ifdef DIRECT_AUDIO_SUPPORT
++extern void SDA_Rx_fun( struct net_device *dev, struct sk_buff *skb);
++#endif
+ VOS_STATUS hdd_rx_packet_cbk(v_VOID_t *vosContext,
+                              adf_nbuf_t rxBuf, v_U8_t staId)
+ {
+@@ -1196,6 +1199,13 @@ VOS_STATUS hdd_rx_packet_cbk(v_VOID_t *vosContext,
+       ++pAdapter->stats.rx_packets;
+       pAdapter->stats.rx_bytes += skb->len;
+ 
++#ifdef DIRECT_AUDIO_SUPPORT
++#define DIRECT_AUDIO_LLC_TYPE 0x43FF
++      if (skb->protocol == cpu_to_be16(DIRECT_AUDIO_LLC_TYPE)) {
++         SDA_Rx_fun(pAdapter->dev, skb);
++         rxstat = NET_RX_SUCCESS;
++      } else {
++#endif
+       /*
+        * If this is not a last packet on the chain
+        * Just put packet into backlog queue, not scheduling RX sirq
+@@ -1214,6 +1224,9 @@ VOS_STATUS hdd_rx_packet_cbk(v_VOID_t *vosContext,
+           */
+          rxstat = netif_rx_ni(skb);
+       }
++#ifdef DIRECT_AUDIO_SUPPORT
++      }
++#endif
+ 
+       if (NET_RX_SUCCESS == rxstat)
+          ++pAdapter->hdd_stats.hddTxRxStats.rxDelivered[cpu_index];
+diff --git a/CORE/HDD/src/wlan_hdd_wext.c b/CORE/HDD/src/wlan_hdd_wext.c
+index 90b0075..9393019 100644
+--- a/CORE/HDD/src/wlan_hdd_wext.c
++++ b/CORE/HDD/src/wlan_hdd_wext.c
+@@ -115,6 +115,11 @@
+ #define HDD_SET_MCBC_FILTERS_TO_FW      1
+ #define HDD_DELETE_MCBC_FILTERS_FROM_FW 0
+ 
++#ifdef DIRECT_AUDIO_SUPPORT
++extern int Direct_Audio_TX_debug(void);
++extern int Direct_Audio_RX_debug(void);
++#endif
++
+ static int ioctl_debug;
+ module_param(ioctl_debug, int, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+ 
+@@ -248,6 +253,7 @@ static const hdd_freq_chan_map_t freq_chan_map[] = { {2412, 1}, {2417, 2},
+ #ifdef CONFIG_WLAN_FWLOG_FILE
+ #define WE_DBGLOG_FWLOG_FILE_MAX_SIZE         89
+ #endif
++#define WE_SET_DIRECT_AUDIO_TEST              90
+ 
+ 
+ /* Private ioctls and their sub-ioctls */
+@@ -7402,6 +7408,20 @@ static int __iw_setint_getnone(struct net_device *dev,
+           }
+           break;
+         }
++#ifdef DIRECT_AUDIO_SUPPORT
++        case WE_SET_DIRECT_AUDIO_TEST:
++        {
++           hddLog(LOGW, "%s: Try Direct_Audiofunction %s\n",
++                      __func__, set_value ? "TX" : "RX");
++
++           if (set_value) {
++               ret = Direct_Audio_TX_debug();
++           } else {
++               ret = Direct_Audio_RX_debug();
++           }
++           break;
++        }
++#endif /* DIRECT_AUDIO_SUPPORT */
+         default:
+         {
+            hddLog(LOGE, "%s: Invalid sub command %d", __func__, sub_cmd);
+@@ -11913,6 +11933,13 @@ static const struct iw_priv_args we_private_args[] = {
+         IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1,
+         0, "erx_dri_sample" },
+ 
++#ifdef DIRECT_AUDIO_SUPPORT
++    {   WE_SET_DIRECT_AUDIO_TEST,
++        IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1,
++        0, "aow" },
++
++#endif
++
+     {   WLAN_PRIV_SET_NONE_GET_INT,
+         0,
+         IW_PRIV_TYPE_INT | IW_PRIV_SIZE_FIXED | 1,
+diff --git a/CORE/SERVICES/COMMON/wmi_unified.h b/CORE/SERVICES/COMMON/wmi_unified.h
+index b6dd041..369f52a 100644
+--- a/CORE/SERVICES/COMMON/wmi_unified.h
++++ b/CORE/SERVICES/COMMON/wmi_unified.h
+@@ -3536,7 +3536,8 @@ typedef enum {
+     WMI_PDEV_PARAM_CUST_TXPOWER_SCALE,
+     /** ATF enabe/disabe dynamically */
+     WMI_PDEV_PARAM_ATF_DYNAMIC_ENABLE,
+-
++    /** set DIRECT AUDIO Sync TSF */
++    WMI_PDEV_PARAM_AUDIO_OVER_WLAN_SYNC_TSF,
+ } WMI_PDEV_PARAM;
+ 
+ typedef enum {

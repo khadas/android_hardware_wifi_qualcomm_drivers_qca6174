@@ -1,0 +1,63 @@
+diff -urN a/system/core/init/devices.c b/system/core/init/devices.c
+--- a/system/core/init/devices.c	2015-11-26 11:35:48.182652310 +0800
++++ b/system/core/init/devices.c	2015-11-26 11:35:46.274652322 +0800
+@@ -951,12 +951,38 @@
+ 
+ }
+ 
++#define WLAN_RECOVERY_SUPPORT 
++
++#ifdef WLAN_RECOVERY_SUPPORT
++extern int insmod(const char *path_name, const char *args);
++extern int rmmod(const char *mod_name, unsigned int flags);
++
++static void handle_wlan_recovery(void)
++{
++    pid_t pid;
++    pid = fork();
++    if (!pid) {
++	rmmod("wlan",0);
++	usleep(1000000);
++	insmod("/system/vendor/wlan.ko","");
++	exit(EXIT_SUCCESS);
++    }
++
++}
++#endif
++
+ static void handle_device_event(struct uevent *uevent)
+ {
+     if (!strcmp(uevent->action,"add")) {
+         handle_module_loading(uevent->modalias);
+     }
+ 
++#ifdef WLAN_RECOVERY_SUPPORT
++    if (!strcmp(uevent->action,"offline")) {
++	handle_wlan_recovery();
++    }
++#endif
++
+     if (!strcmp(uevent->action,"add") || !strcmp(uevent->action, "change") || !strcmp(uevent->action, "online"))
+         fixup_sys_perms(uevent->path);
+ 
+diff -urN a/system/core/libcutils/probe_module.c b/system/core/libcutils/probe_module.c
+--- a/system/core/libcutils/probe_module.c	2015-11-12 12:38:13.978114897 +0800
++++ b/system/core/libcutils/probe_module.c	2015-11-12 12:41:25.458113712 +0800
+@@ -202,7 +202,7 @@
+     return dep;
+ }
+ 
+-static int insmod(const char *path_name, const char *args)
++int insmod(const char *path_name, const char *args)
+ {
+     void *data;
+     unsigned int len;
+@@ -286,7 +286,7 @@
+     return ret;
+ }
+ 
+-static int rmmod(const char *mod_name, unsigned int flags)
++int rmmod(const char *mod_name, unsigned int flags)
+ {
+     return delete_module(mod_name, flags);
+ }

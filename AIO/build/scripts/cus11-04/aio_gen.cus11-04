@@ -1,0 +1,35 @@
+#!/bin/bash
+# Add cus11-04 specific patches
+
+# subverion
+BRD_TYPE_VER=.11.4.07
+
+#
+# For each board type,
+# determine which components should be downloaded.
+# The settings here will overwrite the default in aio_gen_bit.sh.
+# 
+# ONLY add/enable those components need download.
+#
+# 1. patch files
+DOWNLOAD_PATCH=y
+
+# 2. kernel
+DOWNLOAD_KERNEL_BACKPORT_3_12=n
+
+# 3. WLAN/BT host drivers
+if [ ${HOST_DRIVER_VERSION} == '1.3.6.13_L_OS' ]
+then
+	DOWNLOAD_DRIVER_WLAN_HOST=n
+	echo "Download wlan host driver by Git"
+	cd ${AIO_TOP}/drivers
+	git clone git://codeaurora.org/platform/vendor/qcom-opensource/wlan/qcacld-2.0.git -b LA.BF.2.1_rb1.10
+	echo "Download wlan host driver done"
+else
+	DOWNLOAD_DRIVER_WLAN_HOST=y
+fi
+# 4. APPs
+DOWNLOAD_APP_WLAN_WPA_SUPPLICANT_8=n
+DOWNLOAD_APP_WLAN_LIBNL_3_2_25=n
+
+

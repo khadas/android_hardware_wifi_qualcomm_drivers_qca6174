@@ -1,0 +1,11 @@
+--- qcacld-new/CORE/SERVICES/WMA/wma.c.orig	2015-12-21 16:57:50.661165287 +0800
++++ qcacld-new/CORE/SERVICES/WMA/wma.c	2015-12-21 16:58:28.725165052 +0800
+@@ -9783,7 +9783,7 @@
+ 	}
+ 
+ 	if (params->htCapable) {
+-		cmd->peer_flags |= (WMI_PEER_HT | WMI_PEER_QOS);
++		cmd->peer_flags |= (WMI_PEER_HT );
+ 		cmd->peer_rate_caps |= WMI_RC_HT_FLAG;
+ 	}
+ 

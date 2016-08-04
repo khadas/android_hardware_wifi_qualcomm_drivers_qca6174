@@ -1,0 +1,565 @@
+diff --git a/CORE/HDD/inc/wlan_hdd_main.h b/CORE/HDD/inc/wlan_hdd_main.h
+index 3658488..2e8fd27 100644
+--- a/CORE/HDD/inc/wlan_hdd_main.h
++++ b/CORE/HDD/inc/wlan_hdd_main.h
+@@ -1173,6 +1173,12 @@ struct hdd_adapter_s
+     /* Time stamp for start RoC request */
+     v_TIME_t startRocTs;
+ 
++#ifdef WLAN_FEATURE_EXTWOW_SUPPORT
++#ifdef CONFIG_TIZEN_PLATFORM
++    struct work_struct ext_wow_work;
++#endif
++#endif
++
+     /* State for synchronous OCB requests to WMI */
+     struct sir_ocb_set_config_response ocb_set_config_resp;
+     struct sir_ocb_get_tsf_timer_response ocb_get_tsf_timer_resp;
+@@ -1694,6 +1700,12 @@ struct hdd_context_s
+     v_BOOL_t is_extwow_app_type2_param_set;
+     v_BOOL_t ext_wow_should_suspend;
+     struct completion ready_to_extwow;
++    tSirAppType1Params app_type1_params;
++    tSirAppType2Params app_type2_params;
++#ifdef CONFIG_TIZEN_PLATFORM
++    v_BOOL_t ext_wow_enable;
++#endif
++   struct mutex ext_wow_lock;
+ #endif
+ 
+     /* Time since boot up to extscan start (in micro seconds) */
+@@ -2089,4 +2101,11 @@ eHalStatus hdd_smeCloseSessionCallback(void *pContext);
+ 
+ int hdd_enable_disable_ca_event(hdd_context_t *hddctx,
+ 				tANI_U8 set_value);
++
++#ifdef WLAN_FEATURE_EXTWOW_SUPPORT
++#ifdef CONFIG_TIZEN_PLATFORM
++int wlan_hdd_enable_swol(hdd_adapter_t *pAdapter, boolean enable);
++#endif
++#endif
++
+ #endif    // end #if !defined( WLAN_HDD_MAIN_H )
+diff --git a/CORE/HDD/src/wlan_hdd_assoc.c b/CORE/HDD/src/wlan_hdd_assoc.c
+index cd353d0..0203ffa 100644
+--- a/CORE/HDD/src/wlan_hdd_assoc.c
++++ b/CORE/HDD/src/wlan_hdd_assoc.c
+@@ -1056,6 +1056,15 @@ static eHalStatus hdd_DisConnectHandler( hdd_adapter_t *pAdapter, tCsrRoamInfo *
+             }
+ #endif
+ 
++#ifdef WLAN_FEATURE_EXTWOW_SUPPORT
++#ifdef CONFIG_TIZEN_PLATFORM
++            if (pAdapter->device_mode == WLAN_HDD_INFRA_STATION)
++            {
++                wlan_hdd_enable_swol(pAdapter, FALSE);
++            }
++#endif
++#endif
++
+             //If the Device Mode is Station
+             // and the P2P Client is Connected
+             //Enable BMPS
+@@ -1908,6 +1917,14 @@ static eHalStatus hdd_AssociationCompletionHandler( hdd_adapter_t *pAdapter, tCs
+                                        pFTAssocRsp, assocRsplen,
+                                        WLAN_STATUS_SUCCESS,
+                                        GFP_KERNEL);
++#ifdef WLAN_FEATURE_EXTWOW_SUPPORT
++#ifdef CONFIG_TIZEN_PLATFORM
++                    if (pAdapter->device_mode == WLAN_HDD_INFRA_STATION)
++                    {
++                        wlan_hdd_enable_swol(pAdapter, TRUE);
++                    }
++#endif
++#endif
+                 }
+             }
+             else
+@@ -1943,6 +1960,15 @@ static eHalStatus hdd_AssociationCompletionHandler( hdd_adapter_t *pAdapter, tCs
+                                 rspRsnIe, rspRsnLength,
+                                 WLAN_STATUS_SUCCESS,
+                                 GFP_KERNEL);
++#ifdef WLAN_FEATURE_EXTWOW_SUPPORT
++#ifdef CONFIG_TIZEN_PLATFORM
++                       if (pAdapter->device_mode == WLAN_HDD_INFRA_STATION)
++                       {
++                           wlan_hdd_enable_swol(pAdapter, TRUE);
++                       }
++#endif
++#endif
++
+                     }
+                 }
+             }
+diff --git a/CORE/HDD/src/wlan_hdd_main.c b/CORE/HDD/src/wlan_hdd_main.c
+index c6001dd..63275d6 100644
+--- a/CORE/HDD/src/wlan_hdd_main.c
++++ b/CORE/HDD/src/wlan_hdd_main.c
+@@ -3132,12 +3132,11 @@ static int hdd_enable_ext_wow_parser(hdd_adapter_t *pAdapter, int vdev_id,
+    if (0 != rc)
+        return -EINVAL;
+ 
+-   if (value < EXT_WOW_TYPE_APP_TYPE1 || value > EXT_WOW_TYPE_APP_TYPE1_2 ) {
+-       hddLog(VOS_TRACE_LEVEL_ERROR, FL("Invalid type"));
+-       return -EINVAL;
+-   }
++   vos_mem_zero(&params, sizeof(params));
+ 
+-   if (value == EXT_WOW_TYPE_APP_TYPE1 &&
++   if (value == EXT_WOW_DISABLED) {
++        params.type = value;
++   } else if (value == EXT_WOW_TYPE_APP_TYPE1 &&
+         pHddCtx->is_extwow_app_type1_param_set)
+         params.type = value;
+    else if (value == EXT_WOW_TYPE_APP_TYPE2 &&
+@@ -7973,6 +7972,13 @@ static int __hdd_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
+       else
+          ret = hdd_driver_ioctl(pAdapter, ifr);
+       break;
++#ifdef WLAN_FEATURE_EXTWOW_SUPPORT
++#ifdef CONFIG_TIZEN_PLATFORM
++   case (SIOCDEVPRIVATE+10):
++         ret = swol_ioctl(pAdapter, ifr);
++      break;
++#endif
++#endif
+    default:
+       hddLog(VOS_TRACE_LEVEL_ERROR, "%s: unknown ioctl %d",
+              __func__, cmd);
+@@ -7984,6 +7990,224 @@ static int __hdd_ioctl(struct net_device *dev, struct ifreq *ifr, int cmd)
+    return ret;
+ }
+ 
++#ifdef WLAN_FEATURE_EXTWOW_SUPPORT
++#ifdef CONFIG_TIZEN_PLATFORM
++static void wlan_hdd_swol_work_item(struct work_struct *work)
++{
++    hdd_adapter_t *pAdapter = container_of(work,
++                                           hdd_adapter_t,
++                                           ext_wow_work);
++    hdd_context_t *pHddCtx = WLAN_HDD_GET_CTX(pAdapter);
++    tHalHandle hHal = WLAN_HDD_GET_HAL_CTX(pAdapter);
++    struct net_device *dev = pAdapter->dev;
++    int ret = 0;
++
++    if (WLAN_HDD_ADAPTER_MAGIC != pAdapter->magic) {
++        hddLog(LOGE, FL("invalid magic"));
++        return;
++    }
++    ret = wlan_hdd_validate_context(pHddCtx);
++    if (0 != ret) {
++        hddLog(LOGE, FL("HDD context is not valid"));
++        return;
++    }
++
++    mutex_lock(&pHddCtx->ext_wow_lock);
++    if (pHddCtx->ext_wow_enable == TRUE) {
++        pHddCtx->app_type1_params.vdev_id = pAdapter->sessionId;
++        pHddCtx->app_type1_params.id_length = 6;
++        vos_mem_zero(pHddCtx->app_type1_params.identification_id, sizeof(pHddCtx->app_type1_params.identification_id));
++        vos_mem_copy(pHddCtx->app_type1_params.identification_id, "SECWOW", 6);
++        vos_mem_copy(pHddCtx->app_type1_params.swol_indoor_wakee, pAdapter->macAddressCurrent.bytes, 6);
++        ret = hdd_set_app_type1_params(hHal, &(pHddCtx->app_type1_params));
++        if (ret >= 0) {
++            pHddCtx->is_extwow_app_type1_param_set = TRUE;
++        }
++        ret = hdd_enable_ext_wow_parser(pAdapter,
++                                        pAdapter->sessionId, EXT_WOW_TYPE_APP_TYPE1);
++        mutex_unlock(&pHddCtx->ext_wow_lock);
++        if (ret == 0) {
++            ret = cfg80211_wowlan_set(pAdapter->dev, TRUE);
++            if (ret != 0) {
++                VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
++                           "%s failed to set wowlan:%d\n", netdev_name(dev), ret);
++            }
++        } else {
++            VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
++                           "%s failed to enable extwow\n", netdev_name(dev));
++        }
++    } else {
++        ret = hdd_enable_ext_wow_parser(pAdapter,
++                                        pAdapter->sessionId, EXT_WOW_DISABLED);
++        mutex_unlock(&pHddCtx->ext_wow_lock);
++        if (ret != 0) {
++            VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
++                           "%s failed to enable extwow\n", netdev_name(dev));
++        } else {
++            ret = cfg80211_wowlan_set(pAdapter->dev, FALSE);
++            if (ret != 0) {
++                VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
++                           "%s failed to set wowlan:%d\n", netdev_name(dev), ret);
++            }
++        }
++    }
++    mutex_lock(&pHddCtx->ext_wow_lock);
++    vos_mem_zero(&pHddCtx->app_type1_params, sizeof(pHddCtx->app_type1_params));
++    pHddCtx->is_extwow_app_type1_param_set = FALSE;
++    mutex_unlock(&pHddCtx->ext_wow_lock);
++}
++
++static int _wlan_hdd_enable_swol(hdd_adapter_t *pAdapter, boolean enable)
++{
++    hdd_context_t *pHddCtx = WLAN_HDD_GET_CTX(pAdapter);
++
++    pHddCtx->ext_wow_enable = enable;
++    schedule_work(&pAdapter->ext_wow_work);
++    return 0;
++}
++
++int wlan_hdd_enable_swol(hdd_adapter_t *pAdapter, boolean enable)
++{
++    hdd_context_t *pHddCtx = WLAN_HDD_GET_CTX(pAdapter);
++    int ret;
++
++    mutex_lock(&pHddCtx->ext_wow_lock);
++    ret = _wlan_hdd_enable_swol(pAdapter, enable);
++    mutex_unlock(&pHddCtx->ext_wow_lock);
++    return ret;
++}
++
++int swol_ioctl(hdd_adapter_t *pAdapter, struct ifreq *ifr)
++{
++    hdd_context_t *pHddCtx = WLAN_HDD_GET_CTX(pAdapter);
++    int ret = 0;
++    int i =0, j = 0;
++    struct ioctl_priv_params *data;
++    tSirExtWoWParams params;
++
++    data = kmalloc(sizeof(struct ioctl_priv_params), GFP_KERNEL);
++    if (!data)
++        return -ENOMEM;
++
++    if (copy_from_user(data, ifr->ifr_data, sizeof(struct ioctl_priv_params)))
++    {
++        kfree(data);
++        return -EFAULT;
++    }
++
++    mutex_lock(&pHddCtx->ext_wow_lock);
++    switch (data->cmd_id){
++    case IOCTL_PRIV_SWOW_START:
++        switch(data->params.swow_start.cmd) {
++        case 0:
++            ret = _wlan_hdd_enable_swol(pAdapter, TRUE);
++            break;
++        case 1:
++            // Outdoor, not available now.
++            break;
++        case 9:
++            // Stop
++            ret = _wlan_hdd_enable_swol(pAdapter, FALSE);
++            break;
++        default:
++            break;
++        }
++    break;
++    case IOCTL_PRIV_SWOW_WAKER_W:
++        {
++            struct waker *waker_w = &(data->params.swow_waker_w.write_waker);
++            int index = data->params.swow_waker_w.waker_id;
++            if(index > 7){
++                VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
++                             "out of index[0~7] : %d\n", index);
++                ret = -EINVAL;
++                break;
++            }
++
++            for( i=0; i <6; i++)
++                pHddCtx->app_type1_params.swol_indoor_key_mac[index][i] = waker_w->key_mac[i];
++
++            pHddCtx->app_type1_params.swol_indoor_app_mask[index] = waker_w->app_mask;
++            pHddCtx->app_type1_params.swol_indoor_key_len[index] = waker_w->key_len;
++            vos_mem_set( pHddCtx->app_type1_params.swol_indoor_key[index], 0, 16);
++            if(waker_w->key_len > 16){
++                VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
++                            "wrong key len\n");
++                ret = -EINVAL;
++                break;
++            }
++            if (waker_w->key_len) {
++                vos_mem_copy(pHddCtx->app_type1_params.swol_indoor_key[index], waker_w->key, waker_w->key_len);
++            }
++            pHddCtx->app_type1_params.pass_length = waker_w->key_len;
++            vos_mem_set(pHddCtx->app_type1_params.password, 0, 16);
++            if (waker_w->key_len) {
++                vos_mem_copy(pHddCtx->app_type1_params.password, waker_w->key, pHddCtx->app_type1_params.pass_length);
++            }
++        }
++    break;
++    case IOCTL_PRIV_SWOW_WAKER_R:
++    {
++        struct waker *waker_r;
++
++        for( j=0; j < 8; j++) {
++            waker_r = &(data->params.swow_waker_r.read_waker[j]);
++                for( i=0; i <6; i++)
++                    waker_r->key_mac[i] = pHddCtx->app_type1_params.swol_indoor_key_mac[j][i];
++                waker_r->app_mask = pHddCtx->app_type1_params.swol_indoor_app_mask[j];
++                waker_r->key_len = pHddCtx->app_type1_params.swol_indoor_key_len[j];
++                vos_mem_set(waker_r->key, 0, 16);
++                if (waker_r->key_len) {
++                    vos_mem_copy(waker_r->key, pHddCtx->app_type1_params.swol_indoor_key[j], waker_r->key_len);
++                }
++            }
++        }
++    break;
++    case IOCTL_PRIV_SWOW_EXCEPTION_W:
++        pHddCtx->app_type1_params.swol_indoor_exception = data->params.swow_exception.exception;
++        pHddCtx->app_type1_params.swol_indoor_exception_app = data->params.swow_exception.exception_app;
++    break;
++    case IOCTL_PRIV_SWOW_EXCEPTION_R:
++        data->params.swow_exception.exception = pHddCtx->app_type1_params.swol_indoor_exception;
++        data->params.swow_exception.exception_app = pHddCtx->app_type1_params.swol_indoor_exception_app;
++    break;
++    case IOCTL_PRIV_SWOW_PATTEN_W:
++        pHddCtx->app_type1_params.swol_indoor_pattern = data->params.swow_pattern.pattern;
++    break;
++    case IOCTL_PRIV_SWOW_PATTEN_R:
++        data->params.swow_pattern.pattern = pHddCtx->app_type1_params.swol_indoor_pattern;
++    break;
++    case IOCTL_PRIV_SWOW_FILTER_W:
++        pHddCtx->app_type1_params.swol_indoor_waker_check = data->params.swow_filter.waker_check;
++        pHddCtx->app_type1_params.swol_indoor_pw_check = data->params.swow_filter.pw_check;
++        if(pHddCtx->app_type1_params.swol_indoor_waker_check == 0 && pHddCtx->app_type1_params.swol_indoor_pw_check == 1)
++            pHddCtx->app_type1_params.swol_indoor_pw_check = 0;
++    break;
++    case IOCTL_PRIV_SWOW_FILTER_R:
++        data->params.swow_filter.waker_check = pHddCtx->app_type1_params.swol_indoor_waker_check;
++        data->params.swow_filter.pw_check = pHddCtx->app_type1_params.swol_indoor_pw_check;
++    break;
++    case IOCTL_PRIV_SWOW_PULSE_TEST:
++        memset(&params, 0, sizeof(params));
++        params.vdev_id = pAdapter->sessionId;
++        params.type = EXT_WOW_TYPE_APP_PULSETEST;
++        params.wakeup_pin_num = pHddCtx->cfg_ini->extWowApp1WakeupPinNumber |
++                      (pHddCtx->cfg_ini->extWowApp2WakeupPinNumber << 8);
++        params.swol_pulsetest_type = data->params.swow_pulse_test.type;
++        params.swol_pulsetest_application = data->params.swow_pulse_test.app;
++        ret = hdd_enable_ext_wow(pAdapter, &params);
++    break;
++    default:
++    break;
++    }
++
++    mutex_unlock(&pHddCtx->ext_wow_lock);
++    kfree(data);
++    return ret;
++}
++#endif
++#endif
++
+ /**
+  * hdd_ioctl() - Wrapper function to protect __hdd_ioctl() function from SSR
+  * @dev: pointer to net_device structure
+@@ -11136,6 +11360,11 @@ hdd_adapter_t* hdd_open_adapter( hdd_context_t *pHddCtx, tANI_U8 session_type,
+      if (ret != 0)
+         hddLog(LOGE, "FAILED TO SET RTSCTS Profile ret:%d", ret);
+ 
++#ifdef WLAN_FEATURE_EXTWOW_SUPPORT
++#ifdef CONFIG_TIZEN_PLATFORM
++    INIT_WORK(&pAdapter->ext_wow_work, wlan_hdd_swol_work_item);
++#endif
++#endif
+ 
+    return pAdapter;
+ 
+@@ -11301,6 +11530,12 @@ VOS_STATUS hdd_stop_adapter( hdd_context_t *pHddCtx, hdd_adapter_t *pAdapter,
+ 
+    ENTER();
+ 
++#ifdef WLAN_FEATURE_EXTWOW_SUPPORT
++#ifdef CONFIG_TIZEN_PLATFORM
++   cancel_work_sync(&pAdapter->ext_wow_work);
++#endif
++#endif
++
+    hddLog(LOG1, FL("Disabling queues"));
+    netif_tx_disable(pAdapter->dev);
+    netif_carrier_off(pAdapter->dev);
+@@ -11611,6 +11846,14 @@ VOS_STATUS hdd_start_all_adapters( hdd_context_t *pHddCtx )
+       switch(pAdapter->device_mode)
+       {
+          case WLAN_HDD_INFRA_STATION:
++#ifdef WLAN_FEATURE_EXTWOW_SUPPORT
++#ifdef CONFIG_TIZEN_PLATFORM
++            if (pAdapter->device_mode == WLAN_HDD_INFRA_STATION) {
++                wlan_hdd_enable_swol(pAdapter, FALSE);
++            }
++#endif
++#endif
++
+          case WLAN_HDD_P2P_CLIENT:
+          case WLAN_HDD_P2P_DEVICE:
+ 
+@@ -14231,6 +14474,13 @@ int hdd_wlan_startup(struct device *dev, v_VOID_t *hif_sc)
+ 
+    hdd_list_init( &pHddCtx->hddAdapters, MAX_NUMBER_OF_ADAPTERS );
+ 
++#ifdef WLAN_FEATURE_EXTWOW_SUPPORT
++#ifdef CONFIG_TIZEN_PLATFORM
++   pHddCtx->ext_wow_enable = FALSE;
++   mutex_init(&pHddCtx->ext_wow_lock);
++#endif
++#endif
++
+ #ifdef FEATURE_WLAN_TDLS
+    /* tdls_lock is initialized before an hdd_open_adapter ( which is
+     * invoked by other instances also) to protect the concurrent
+diff --git a/CORE/MAC/inc/sirApi.h b/CORE/MAC/inc/sirApi.h
+index 936b68a..248c61a 100644
+--- a/CORE/MAC/inc/sirApi.h
++++ b/CORE/MAC/inc/sirApi.h
+@@ -3599,7 +3599,8 @@ typedef enum ext_wow_type
+     EXT_WOW_TYPE_APP_TYPE1, /* wow type: only enable wakeup for app type1 */
+     EXT_WOW_TYPE_APP_TYPE2, /* wow type: only enable wakeup for app type2 */
+     EXT_WOW_TYPE_APP_TYPE1_2, /* wow type: enable wakeup for app type1&2 */
+-
++    EXT_WOW_TYPE_APP_PULSETEST,
++    EXT_WOW_DISABLED = 255, /* wow type: only enable wakeup for app type1 */
+ }EXT_WOW_TYPE;
+ 
+ typedef struct
+@@ -3607,6 +3608,8 @@ typedef struct
+     tANI_U8 vdev_id;
+     EXT_WOW_TYPE type;
+     tANI_U32 wakeup_pin_num;
++    tANI_U8 swol_pulsetest_type;
++    tANI_U8 swol_pulsetest_application;
+ } tSirExtWoWParams, *tpSirExtWoWParams;
+ 
+ typedef struct
+@@ -3617,8 +3620,81 @@ typedef struct
+     tANI_U8 password[16];
+     tANI_U32 id_length;
+     tANI_U32 pass_length;
++
++    tANI_U8 swol_indoor_wakee[6];
++    tANI_U8 swol_indoor_key[8][16];
++    tANI_U8 swol_indoor_key_len[8];
++    tANI_U8 swol_indoor_key_mac[8][6];
++    tANI_U32 swol_indoor_app_mask[8];
++    tANI_U8 swol_indoor_waker_check;
++    tANI_U8 swol_indoor_pw_check;
++    tANI_U8 swol_indoor_pattern;
++    tANI_U8 swol_indoor_exception;
++    tANI_U8 swol_indoor_exception_app;
+ } tSirAppType1Params, *tpSirAppType1Params;
+ 
++/*SWOW waker used format*/
++struct waker{
++    u8 key_mac[6];
++    u8 key_len;
++    u8 key[16]; //Hex format
++    u32 app_mask;
++};
++
++struct ioctl_priv_params {
++    u16 cmd_id; //Mapping to "enum ioctl_priv_cmds"
++    u16 cmd_len;//Read or Write length
++    union {
++    /*Structure of SWOW USED*/
++        struct {
++            u8 cmd;
++            char* arp_ip_addr;
++        } swow_start;       //IOCTL_PRIV_SWOW_START
++
++        struct {
++            u8 waker_id;
++            struct waker write_waker;
++        } swow_waker_w;     //IOCTL_PRIV_SWOW_WAKER_W
++
++        struct {
++            struct waker read_waker[8];
++        } swow_waker_r;     //IOCTL_PRIV_SWOW_WAKER_R
++
++        struct {
++            u8 exception;
++            u8 exception_app;
++        } swow_exception;       //IOCTL_PRIV_SWOW_EXCEPTION_W & IOCTL_PRIV_SWOW_EXCEPTION_R
++
++        struct {
++            u8 pattern;
++        } swow_pattern;       //IOCTL_PRIV_SWOW_PATTEN_W & IOCTL_PRIV_SWOW_PATTEN_R
++
++        struct {
++            u8 waker_check;
++            u8 pw_check;
++        } swow_filter;       //IOCTL_PRIV_SWOW_FILTER_W & IOCTL_PRIV_SWOW_FILTER_R
++
++        struct {
++            u8 type;
++            u8 app;
++        } swow_pulse_test;   //IOCTL_PRIV_SWOW_PULSE_TEST
++    } params;
++} __packed;
++
++enum ioctl_priv_cmds
++{
++    IOCTL_PRIV_SWOW_START       = 33,//Write of swow_start
++    IOCTL_PRIV_SWOW_WAKER_W     = 34,//Write of swow_waker
++    IOCTL_PRIV_SWOW_WAKER_R     = 35,//Read of swow_waker
++    IOCTL_PRIV_SWOW_EXCEPTION_W = 36,//Write of swow_exception
++    IOCTL_PRIV_SWOW_EXCEPTION_R = 37,//Read of swow_exception
++    IOCTL_PRIV_SWOW_PATTEN_W    = 38,//Write of swow_pattern
++    IOCTL_PRIV_SWOW_PATTEN_R    = 39,//Read of swow_pattern
++    IOCTL_PRIV_SWOW_FILTER_W    = 40,//Write of swow_filter
++    IOCTL_PRIV_SWOW_FILTER_R    = 41,//Read of swow_filter
++    IOCTL_PRIV_SWOW_PULSE_TEST  = 42,//Write of swow_pulse_test
++};
++
+ typedef struct
+ {
+     tANI_U8 vdev_id;
+diff --git a/CORE/SERVICES/WMA/wma.c b/CORE/SERVICES/WMA/wma.c
+index 8ed5149..9078777 100644
+--- a/CORE/SERVICES/WMA/wma.c
++++ b/CORE/SERVICES/WMA/wma.c
+@@ -2424,6 +2424,18 @@ static int wma_set_app_type1_params_in_fw(tp_wma_handle wma,
+ 	cmd->ident_len = appType1Params->id_length;
+ 	vos_mem_copy(cmd->passwd, appType1Params->password, 16);
+ 	cmd->passwd_len = appType1Params->pass_length;
++	WMI_CHAR_ARRAY_TO_MAC_ADDR(appType1Params->swol_indoor_wakee, &cmd->wakee_mac);
++	vos_mem_copy(cmd->swol_indoor_key, appType1Params->swol_indoor_key, sizeof(cmd->swol_indoor_key));
++	vos_mem_copy(cmd->swol_indoor_key_len, appType1Params->swol_indoor_key_len, sizeof(cmd->swol_indoor_key_len));
++	for (i = 0; i < 8; i++) {
++		WMI_CHAR_ARRAY_TO_MAC_ADDR(appType1Params->swol_indoor_key_mac[i], &cmd->swol_indoor_key_mac[i]);
++	}
++	vos_mem_copy(cmd->swol_indoor_app_mask, appType1Params->swol_indoor_app_mask, sizeof(cmd->swol_indoor_app_mask));
++	cmd->swol_indoor_waker_check = appType1Params->swol_indoor_waker_check;
++	cmd->swol_indoor_pw_check = appType1Params->swol_indoor_pw_check;
++	cmd->swol_indoor_pattern = appType1Params->swol_indoor_pattern;
++	cmd->swol_indoor_exception = appType1Params->swol_indoor_exception;
++	cmd->swol_indoor_exception_app = appType1Params->swol_indoor_exception_app;
+ 
+ 	WMA_LOGD("%s: vdev_id %d wakee_mac_addr %pM "
+ 			 "identification_id %.8s id_length %u "
+@@ -2432,6 +2444,29 @@ static int wma_set_app_type1_params_in_fw(tp_wma_handle wma,
+ 		cmd->ident, cmd->ident_len,
+ 		cmd->passwd, cmd->passwd_len);
+ 
++#ifdef CONFIG_TIZEN_PLATFORM
++	printk(KERN_ERR "SWOW: vdev_id %d "
++                         "identification_id %.8s id_length %u "
++                         "password %.16s pass_length %u"
++                         "waker filter:%u passwd filter:%u pattern:%u exception:%u exception_app:%u\n",
++		cmd->vdev_id, cmd->ident, cmd->ident_len,
++		cmd->passwd, cmd->passwd_len,
++		cmd->swol_indoor_waker_check,
++		cmd->swol_indoor_pw_check,
++		cmd->swol_indoor_pattern,
++		cmd->swol_indoor_exception,
++		cmd->swol_indoor_exception_app);
++	for (i = 0; i < 8; i++) {
++		printk(KERN_ERR "Waker [%d] %08x%08x %s(%u) 0x%x\n",
++			i,
++			cmd->swol_indoor_key_mac[i].mac_addr47to32,
++			cmd->swol_indoor_key_mac[i].mac_addr31to0,
++			cmd->swol_indoor_key[i],
++			cmd->swol_indoor_key_len[i],
++			cmd->swol_indoor_app_mask[i]);
++	}
++#endif
++
+ 	ret = wmi_unified_cmd_send(wma->wmi_handle, buf, len,
+ 				   WMI_EXTWOW_SET_APP_TYPE1_PARAMS_CMDID);
+ 	if (ret) {

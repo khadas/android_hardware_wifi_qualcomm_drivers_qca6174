@@ -1,0 +1,42 @@
+#
+# Please modify KERNELPATH, KERNELARCH and TOOLPREFIX to meet your environment
+#
+export KERNELPATH=<path of kernel header>
+export TOOLCHAIN=<path of toolchain>
+export ANDROID_TA-R127_PROJ_PATH=<path of Android_ta-r107c1 project>
+export KERNELARCH=i386
+export CROSS_COMPILE=${TOOLCHAIN}/x86_64-linux-android-
+export TOOLPREFIX=${CROSS_COMPILE}
+export ANDROID_BSP_VERSION=<rome-usb-ax86-kk, rome-usb-ax86-l, tf-sdio-ax86-kk,tf-usb-ax86-l>
+
+export ANDROID_TA-R127_PROJ_VENDOR_PATH=${ANDROID_TA-R127_PROJ_PATH}/out/target/product/x86/system/vendor
+export ANDROID_TA-R127_PROJ_WLANFW_PATH=${ANDROID_TA-R127_PROJ_PATH}/out/target/product/x86/system/lib/firmware
+export ANDROID_TA-R127_PROJ_BTFW_PATH=${ANDROID_TA-R127_PROJ_PATH}/out/target/product/x86/system/lib/firmware/ar3k
+export ANDROID_TA-R127_PROJ_WLAN_PATH=${ANDROID_TA-R127_PROJ_WLANFW_PATH}/wlan
+
+# for backports
+export KLIB=${KERNELPATH}
+export KLIB_BUILD=${KERNELPATH}
+
+# Use local libnl library or not
+export BUILD_LIBNL=y
+export INCLUDE_LIBNL32_HEADER=${ATH_TOPDIR}/apps/libnl-3.2.25/include
+export INCLUDE_LIBNL32_LIB=-lm ${ATH_TOPDIR}/apps/libnl-3.2.25/lib/.libs/libnl-3.a
+export INCLUDE_LIBNL32_GENL_LIB =-lm ${ATH_TOPDIR}/apps/libnl-3.2.25/lib/.libs/libnl-genl-3.a
+
+
+# Put one copy of firmware to local PC or not. Need root privilege.
+export BUILD_DRIVERFW_TOLOCAL=y
+
+# Build regdb into cfg80211.ko
+export CONFIG_CFG80211_INTERNAL_REGDB=y
+
+# PMF (11W)
+export CONFIG_PMF_SUPPORT=y
+
+# Tufello IF
+ifeq ($(IF_TYPE),USB)
+	export CONFIG_TUFELLO_IF=usb
+    export CONFIG_HIF_USB_TASKLET=1
+endif
+

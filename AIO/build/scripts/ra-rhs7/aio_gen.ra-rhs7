@@ -1,0 +1,37 @@
+#!/bin/bash
+# Add x86-android specific patches
+
+# subverion
+BRD_TYPE_VER=ra-rhs7
+
+#
+# For each board type,
+# determine which components should be downloaded.
+# The settings here will overwrite the default in aio_gen_bit.sh.
+# 
+# ONLY add/enable those components need download.
+#
+# 1. patch files
+DOWNLOAD_PATCH=y
+
+# 2. kernel
+DOWNLOAD_KERNEL_BACKPORT_3_12=y
+
+# 3. WLAN/BT host drivers
+DOWNLOAD_DRIVER_WLAN_HOST=y
+
+# 4. APPs
+DOWNLOAD_APP_WLAN_WPA_SUPPLICANT_8=y
+DOWNLOAD_APP_WLAN_LIBNL_3_2_25=y
+
+BOARD_TYPE_PREFIX=${INPUT_BOARD_TYPE}
+
+# The format of array should be composed of "BOARD_TYPE_PREFIX + BOARD_TYPE_POSTFIX"
+declare -a ra_rhs7_aio_patch_arr=(                               
+"x86-001-wpa_supplicant_support_vendor_cmd.patch"
+)                                                                               
+                                                                                
+# Please add the correct link on CAF if related folder released                 
+BOARD_TYPE_AIO_PATCH_CAF="https://source.codeaurora.org/patches/external/wlan/fixce/3rdparty/patches/x86"
+CAF_BT_URL="https://source.codeaurora.org/external/thundersoft/kernel/msm-3.10/patch/net/bluetooth/hci_core.c?id="
+
