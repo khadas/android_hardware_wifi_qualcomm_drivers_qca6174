@@ -70,6 +70,10 @@
 #include "regdomain_common.h"
 #include "vos_utils.h"
 
+#define MAX_PWR_FCC_CHAN_12 8
+#define MAX_PWR_FCC_CHAN_13 2
+
+
 #define CSR_NUM_IBSS_START_CHANNELS_50      4
 #define CSR_NUM_IBSS_START_CHANNELS_24      3
 /* 15 seconds, for WPA, WPA2, CCKM */
@@ -489,12 +493,6 @@ eHalStatus csrUpdateChannelList(tpAniSirGlobal pMac)
 
     for (i = 0; i < pScan->base20MHzChannels.numChannels; i++)
     {
-        if (pScan->fcc_constraint) {
-            if (pScan->base20MHzChannels.channelList[i] == 12)
-                continue;
-            if (pScan->base20MHzChannels.channelList[i] == 13)
-                continue;
-        }
         channel_state =
             vos_nv_getChannelEnabledState(
                 pScan->base20MHzChannels.channelList[i]);
@@ -506,6 +504,22 @@ eHalStatus csrUpdateChannelList(tpAniSirGlobal pMac)
             pChanList->chanParam[num_channel].pwr =
                 csrFindChannelPwr(pScan->defaultPowerTable,
                                   pChanList->chanParam[num_channel].chanId);
+
+            if (pScan->fcc_constraint) {
+                if (pChanList->chanParam[num_channel].chanId == 12) {
+                    pChanList->chanParam[num_channel].pwr =
+                                        MAX_PWR_FCC_CHAN_12;
+                    smsLog(pMac, LOG1,
+                     "fcc_constraint is set, txpower for channel 12 is 8db");
+                }
+                if (pChanList->chanParam[num_channel].chanId == 13) {
+                    pChanList->chanParam[num_channel].pwr =
+                                        MAX_PWR_FCC_CHAN_13;
+                    smsLog(pMac, LOG1,
+                     "fcc_constraint is set, txpower for channel 13 is 2db");
+                }
+            }
+
             if (NV_CHANNEL_ENABLE == channel_state)
                 pChanList->chanParam[num_channel].dfsSet = VOS_FALSE;
             else
@@ -11826,6 +11840,12 @@ static eCsrCfgDot11Mode csrRoamGetPhyModeBandForBss( tpAniSirGlobal pMac, tCsrRo
      cfgDot11Mode = eCSR_CFG_DOT11_MODE_11B;
    }
 
+   if (IS_24G_CH(operationChn) &&
+        (false == pMac->roam.configParam.enableVhtFor24GHz) &&
+        (eCSR_CFG_DOT11_MODE_11AC == cfgDot11Mode ||
+            eCSR_CFG_DOT11_MODE_11AC_ONLY == cfgDot11Mode)) {
+        cfgDot11Mode = eCSR_CFG_DOT11_MODE_11N;
+    }
     /* Incase of WEP Security encryption type is coming as part of add key.
        So while Start BSS dont have information */
     if ((!CSR_IS_11n_ALLOWED(pProfile->EncryptionType.encryptionType[0]) ||
@@ -18904,6 +18924,13 @@ csrRoamChannelChangeReq(tpAniSirGlobal pMac, tCsrBssid bssid,
     pMsg->vht_channel_width = pprofile->vht_channel_width;
     pMsg->dot11mode =
        csrTranslateToWNICfgDot11Mode(pMac,pMac->roam.configParam.uCfgDot11Mode);
+
+    if (IS_24G_CH(pMsg->targetChannel) &&
+        (false == pMac->roam.configParam.enableVhtFor24GHz) &&
+        (WNI_CFG_DOT11_MODE_11AC == pMsg->dot11mode ||
+            WNI_CFG_DOT11_MODE_11AC_ONLY == pMsg->dot11mode)) {
+        pMsg->dot11mode = WNI_CFG_DOT11_MODE_11N;
+    }
 
     vos_mem_copy(pMsg->bssid, bssid, VOS_MAC_ADDR_SIZE);
     vos_mem_copy((void*)&pMsg->operational_rateset,

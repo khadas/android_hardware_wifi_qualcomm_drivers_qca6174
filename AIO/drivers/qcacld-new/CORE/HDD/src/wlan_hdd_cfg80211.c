@@ -10837,7 +10837,8 @@ static void wlan_hdd_set_sapHwmode(hdd_adapter_t *pHostapdAdapter)
 }
 
 static int wlan_hdd_add_ie(hdd_adapter_t* pHostapdAdapter, v_U8_t *genie,
-                              v_U8_t *total_ielen, v_U8_t *oui, v_U8_t oui_size)
+                              v_U16_t *total_ielen, v_U8_t *oui,
+                              v_U8_t oui_size)
 {
     v_U16_t ielen = 0;
     v_U8_t *pIe = NULL;
@@ -10864,7 +10865,7 @@ static int wlan_hdd_add_ie(hdd_adapter_t* pHostapdAdapter, v_U8_t *genie,
 }
 
 static void wlan_hdd_add_hostapd_conf_vsie(hdd_adapter_t* pHostapdAdapter,
-                                           v_U8_t *genie, v_U8_t *total_ielen)
+                                           v_U8_t *genie, v_U16_t *total_ielen)
 {
     beacon_data_t *pBeacon = pHostapdAdapter->sessionCtx.ap.beacon;
     int left = pBeacon->tail_len;
@@ -10925,7 +10926,7 @@ static void wlan_hdd_add_hostapd_conf_vsie(hdd_adapter_t* pHostapdAdapter,
 }
 
 static void wlan_hdd_add_extra_ie(hdd_adapter_t* pHostapdAdapter,
-                                           v_U8_t *genie, v_U8_t *total_ielen,
+                                           v_U8_t *genie, v_U16_t *total_ielen,
                                            v_U8_t temp_ie_id)
 {
     beacon_data_t *pBeacon = pHostapdAdapter->sessionCtx.ap.beacon;
@@ -10975,7 +10976,7 @@ static void wlan_hdd_add_extra_ie(hdd_adapter_t* pHostapdAdapter,
 
 #ifdef QCA_HT_2040_COEX
 static void wlan_hdd_add_sap_obss_scan_ie(
-	hdd_adapter_t *pHostapdAdapter, v_U8_t *ie_buf, v_U8_t *ie_len)
+	hdd_adapter_t *pHostapdAdapter, v_U8_t *ie_buf, v_U16_t *ie_len)
 {
 	if (WLAN_HDD_SOFTAP == pHostapdAdapter->device_mode) {
 		if (wlan_hdd_get_sap_obss(pHostapdAdapter))
@@ -10985,7 +10986,7 @@ static void wlan_hdd_add_sap_obss_scan_ie(
 }
 #else
 static void wlan_hdd_add_sap_obss_scan_ie(
-	hdd_adapter_t* pHostapdAdapter, v_U8_t *ie_buf, v_U8_t *ie_len)
+	hdd_adapter_t* pHostapdAdapter, v_U8_t *ie_buf, v_U16_t *ie_len)
 {
 }
 #endif
@@ -10993,7 +10994,7 @@ static void wlan_hdd_add_sap_obss_scan_ie(
 int wlan_hdd_cfg80211_update_apies(hdd_adapter_t* pHostapdAdapter)
 {
     v_U8_t *genie;
-    v_U8_t total_ielen = 0;
+    v_U16_t total_ielen = 0;
     int ret = 0;
     tsap_Config_t *pConfig;
     tSirUpdateIE   updateIE;
@@ -16226,21 +16227,30 @@ int wlan_hdd_cfg80211_connect_start( hdd_adapter_t  *pAdapter,
             hdd_select_cbmode(pAdapter,operatingChannel, &ch_width);
             pRoamProfile->vht_channel_width = ch_width;
         }
-
-        /* change conn_state to connecting before sme_RoamConnect(), because sme_RoamConnect()
-         * has a direct path to call hdd_smeRoamCallback(), which will change the conn_state
-         * If direct path, conn_state will be accordingly changed to NotConnected or Associated
-         * by either hdd_AssociationCompletionHandler() or hdd_DisConnectHandler() in sme_RoamCallback()
-         * if sme_RomConnect is to be queued, Connecting state will remain until it is completed.
+        /*
+         * Change conn_state to connecting before sme_RoamConnect(),
+         * because sme_RoamConnect() has a direct path to call
+         * hdd_smeRoamCallback(), which will change the conn_state
+         * If direct path, conn_state will be accordingly changed
+         * to NotConnected or Associated by either
+         * hdd_AssociationCompletionHandler() or hdd_DisConnectHandler()
+         * in sme_RoamCallback()
+         * if sme_RomConnect is to be queued,
+         * Connecting state will remain until it is completed.
+         * If connection state is not changed,
+         * connection state will remain in eConnectionState_NotConnected state.
+         * In hdd_AssociationCompletionHandler, "hddDisconInProgress" is set
+         * to true if conn state is eConnectionState_NotConnected.
+         * If "hddDisconInProgress" is set to true then cfg80211 layer is not
+         * informed of connect result indication which is an issue.
          */
+
         if (WLAN_HDD_INFRA_STATION == pAdapter->device_mode ||
-            WLAN_HDD_P2P_CLIENT == pAdapter->device_mode)
-        {
-            VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
-                   "%s: Set HDD connState to eConnectionState_Connecting",
-                   __func__);
+                WLAN_HDD_P2P_CLIENT == pAdapter->device_mode) {
+            hddLog(LOG1,
+                    FL("Set HDD connState to eConnectionState_Connecting"));
             hdd_connSetConnectionState(pAdapter,
-                                        eConnectionState_Connecting);
+                    eConnectionState_Connecting);
         }
 
         /* After 8-way handshake supplicant should give the scan command
@@ -16292,11 +16302,10 @@ int wlan_hdd_cfg80211_connect_start( hdd_adapter_t  *pAdapter,
 
         if ((eHAL_STATUS_SUCCESS != status) &&
             (WLAN_HDD_INFRA_STATION == pAdapter->device_mode ||
-             WLAN_HDD_P2P_CLIENT == pAdapter->device_mode))
-
-        {
-            hddLog(VOS_TRACE_LEVEL_ERROR, "%s: sme_RoamConnect (session %d) failed with "
-                                      "status %d. -> NotConnected", __func__, pAdapter->sessionId, status);
+             WLAN_HDD_P2P_CLIENT == pAdapter->device_mode)) {
+            hddLog(LOGE,
+                    FL("sme_RoamConnect (session %d) failed with status %d. -> NotConnected"),
+                    pAdapter->sessionId, status);
             /* change back to NotAssociated */
             hdd_connSetConnectionState(pAdapter,
                                        eConnectionState_NotConnected);

@@ -13,12 +13,12 @@ export QCA_DRIVER_TOPDIR=${ATH_TOPDIR}/drivers
 # Compat related flags
 export
 COMPAT_LATEST_VERSION = 1
-KERNEL_VERSION := $(shell make -C $(KERNELPATH) ARCH=$(KERNELARCH) kernelversion | sed -n 's/^\([0-9]\)\..*/\1/p')
+KERNEL_VERSION := $(shell make -C $(KERNELPATH) kernelversion | sed -n 's/^\([0-9]\)\..*/\1/p')
 ifneq ($(KERNEL_VERSION),2)
-KERNEL_SUBLEVEL := $(shell make -C $(KERNELPATH) ARCH=$(KERNELARCH) kernelversion | sed -n 's/^3\.\([0-9]\+\).*/\1/p')
+KERNEL_SUBLEVEL := $(shell make -C $(KERNELPATH) kernelversion | sed -n 's/^3\.\([0-9]\+\).*/\1/p')
 else
 COMPAT_26LATEST_VERSION = 39
-KERNEL_26SUBLEVEL := $(shell make -C $(KERNELPATH) ARCH=$(KERNELARCH) kernelversion | sed -n 's/^2\.6\.\([0-9]\+\).*/\1/p')
+KERNEL_26SUBLEVEL := $(shell make -C $(KERNELPATH) kernelversion | sed -n 's/^2\.6\.\([0-9]\+\).*/\1/p')
 COMPAT_26VERSIONS := $(shell I=$(COMPAT_26LATEST_VERSION); while [ "$$I" -gt $(KERNEL_26SUBLEVEL) ]; do echo $$I; I=$$(($$I - 1)); done)
 $(foreach ver,$(COMPAT_26VERSIONS),$(eval CONFIG_COMPAT_KERNEL_2_6_$(ver)=y))
 KERNEL_SUBLEVEL := -1
@@ -155,15 +155,16 @@ else
 endif
 
 #################################################################################################################################
-all: $(TARGET_ALL)
+all: $(TARGET_ALL) firmware_install
 
 clean: $(TARGET_CLEAN)
 
 # backport build for cfg80211
 backports_build:
-	${MAKEARCH} -C $(KERNEL_BACKPORT_PWD) SUBDIRS=$(KERNEL_BACKPORT_PWD) modules -j32
+	${MAKEARCH} -C $(KERNEL_BACKPORT_PWD) SUBDIRS=$(KERNEL_BACKPORT_PWD) modules
 
 backports_clean:
+	@echo "backports_clean"
 	${MAKEARCH} -C $(KERNEL_BACKPORT_PWD) SUBDIRS=$(KERNEL_BACKPORT_PWD) clean
 
 #
@@ -179,7 +180,7 @@ cfg80211_clean:
 # qcacld driver build
 #
 qcacld_build:
-	${MAKEARCH} -C $(KERNELPATH) SUBDIRS=$(ATH_QCACLD_TOPDIR) KBUILD_EXTRA_SYMBOLS=$(MODULE_SYMBOL_DIR)/Module.symvers modules  $(KBUILD_OPTIONS) -j32
+	${MAKEARCH} -C $(KERNELPATH) SUBDIRS=$(ATH_QCACLD_TOPDIR) KBUILD_EXTRA_SYMBOLS=$(MODULE_SYMBOL_DIR)/Module.symvers modules  $(KBUILD_OPTIONS)
 
 qcacld_clean:
 	${MAKEARCH} -C $(KERNELPATH) SUBDIRS=$(ATH_QCACLD_TOPDIR) clean

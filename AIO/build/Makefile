@@ -6,14 +6,8 @@ export BACKPORT_PWD=$(shell pwd)/backports
 # different customer want to use different wpa_supplicant
 # in board_type config file, we can override it
 export WPA_SUPPLICANT_TOPDIR=${ATH_TOPDIR}/apps/wpa_supplicant_8
-ifeq (${KERNELPATH}, )
-export KERNELPATH=/mnt/nfsroot/weiguang.ruan/android5.1/out/target/product/p201/obj/KERNEL_OBJ/
-else
-$(info KERNELPATH=${KERNELPATH})
-export KERNELPATH
-endif
 
-include $(ATH_TOPDIR)/build/env.makefile
+include ./env.makefile
 include scripts/${BOARD_TYPE}/config.${BOARD_TYPE}
 include scripts/${BOARD_TYPE}/Makefile.${BOARD_TYPE}
 ifneq ($(wildcard scripts/${BOARD_TYPE}/Makefile.${BLUETOOTHSTACK}), )
@@ -53,7 +47,7 @@ export FW_WLAN_NAME=qcacld-new
 export CFG80211_NAME=backports
 
 #################################################################################################################################
-clean: drivers_clean rootfs_clean
+clean:  drivers_clean rootfs_clean
 
 #
 # rootfs build
@@ -67,7 +61,6 @@ rootfs_prep:
 
 rootfs_build:
 	@echo Build rootfs
-	@cp -Rf $(ROOTFS_TOPDIR)/* $(INSTALL_ROOT)
 
 rootfs_clean:
 	@echo Clean rootfs
@@ -124,28 +117,38 @@ strip_modules:
 # wpa_supplicant build
 #
 wpa_supplicant: rootfs_prep wpa_supplicant_clean libnl
+ifneq ($(BUILD_APP_WLAN_WPA_SUPPLICANT_8), n)
 	@echo Build wpa_supplicant
 	cd $(WPA_SUPPLICANT_TOPDIR)/wpa_supplicant && \
 	${MAKEARCH} CC=$(TOOLPREFIX)gcc AR=$(TOOLPREFIX)ar LD=$(TOOLPREFIX)ld && \
 	${MAKEARCH} DESTDIR=$(INSTALL_ROOT) BINDIR=/sbin LIBDIR=/lib install
+endif
 
 wpa_supplicant_clean:
+ifneq ($(BUILD_APP_WLAN_WPA_SUPPLICANT_8), n)
 	@echo Clean wpa_supplicant
 	cd $(WPA_SUPPLICANT_TOPDIR)/wpa_supplicant && ${MAKEARCH} clean
+endif
 
 #
 # hostapd build
 #
 hostapd: rootfs_prep hostapd_clean libnl
+ifneq ($(BUILD_APP_WLAN_HOSTAP_2_4), n)
 	@echo Build hostapd
 	cd $(WPA_SUPPLICANT_TOPDIR)/hostapd && \
 	${MAKEARCH} CC=$(TOOLPREFIX)gcc AR=$(TOOLPREFIX)ar LD=$(TOOLPREFIX)ld && \
 	cp -f hostapd $(INSTALL_ROOT)/sbin && \
 	cp -f hostapd_cli $(INSTALL_ROOT)/sbin
+endif
+
 
 hostapd_clean:
+ifneq ($(BUILD_APP_WLAN_HOSTAP_2_4), n)
 	@echo Clean hostapd
 	cd $(WPA_SUPPLICANT_TOPDIR)/hostapd && ${MAKEARCH} clean
+endif
+
 
 #
 # iw build
@@ -164,18 +167,24 @@ iw_clean:
 # libnl build
 #
 libnl_config:
+ifneq ($(BUILD_APP_WLAN_LIBNL_3_2_25), n)
 	@echo Config libnl1-3.2.25
 	cd $(LIBNL32_TOPDIR) && \
 	./configure --host=$(KERNELARCH) CC=$(TOOLPREFIX)gcc AR=$(TOOLPREFIX)ar LD=$(TOOLPREFIX)ld
+endif
 
 libnl: libnl_config libnl_clean
+ifneq ($(BUILD_APP_WLAN_LIBNL_3_2_25), n)
 	@echo Build libnl1-3.2.25
 	cd $(LIBNL32_TOPDIR) && \
 	${MAKEARCH}
+endif
 
 libnl_clean:
+ifneq ($(BUILD_APP_WLAN_LIBNL_3_2_25), n)
 	@echo Clean libnl1-3.2.25
 	cd $(LIBNL32_TOPDIR) && ${MAKEARCH} clean
+endif
 
 
 #
