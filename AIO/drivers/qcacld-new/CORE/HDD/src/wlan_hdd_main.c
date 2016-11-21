@@ -251,7 +251,7 @@ typedef char            A_CHAR;
 #endif
 #define A_ROUND_UP(x, y)  ((((x) + ((y) - 1)) / (y)) * (y))
 
-char qcafwpath[256] = "/system/etc/wifi/firmware";
+char qcafwpath[256] = "/system/etc/wifi/qca6174";
 
 static int android_readwrite_file(const A_CHAR *filename, A_CHAR *rbuf, const A_CHAR *wbuf, size_t length)
 {

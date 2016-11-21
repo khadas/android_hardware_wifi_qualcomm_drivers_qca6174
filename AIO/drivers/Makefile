@@ -155,13 +155,13 @@ else
 endif
 
 #################################################################################################################################
-all: $(TARGET_ALL) firmware_install
+all: $(TARGET_ALL)
 
 clean: $(TARGET_CLEAN)
 
 # backport build for cfg80211
 backports_build:
-	${MAKEARCH} -C $(KERNEL_BACKPORT_PWD) SUBDIRS=$(KERNEL_BACKPORT_PWD) modules
+	${MAKEARCH} -C $(KERNEL_BACKPORT_PWD) SUBDIRS=$(KERNEL_BACKPORT_PWD) modules -j8
 
 backports_clean:
 	@echo "backports_clean"
@@ -180,7 +180,7 @@ cfg80211_clean:
 # qcacld driver build
 #
 qcacld_build:
-	${MAKEARCH} -C $(KERNELPATH) SUBDIRS=$(ATH_QCACLD_TOPDIR) KBUILD_EXTRA_SYMBOLS=$(MODULE_SYMBOL_DIR)/Module.symvers modules  $(KBUILD_OPTIONS)
+	${MAKEARCH} -C $(KERNELPATH) SUBDIRS=$(ATH_QCACLD_TOPDIR) KBUILD_EXTRA_SYMBOLS=$(MODULE_SYMBOL_DIR)/Module.symvers modules  $(KBUILD_OPTIONS) -j8
 
 qcacld_clean:
 	${MAKEARCH} -C $(KERNELPATH) SUBDIRS=$(ATH_QCACLD_TOPDIR) clean

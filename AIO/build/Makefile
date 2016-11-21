@@ -26,7 +26,7 @@ endif
 #################################################################################################################################
 export MAKEARCH=make ARCH=$(KERNELARCH) CROSS_COMPILE=$(TOOLPREFIX)
 
-export INSTALL_ROOT=${ATH_TOPDIR}/rootfs-$(BOARD_TYPE).build
+export INSTALL_ROOT=${ATH_TOPDIR}/rootfs-x86-android.build
 export ROOTFS_TOPDIR=${ATH_TOPDIR}/rootfs
 export WLAN_DRIVER_TOPDIR=${ATH_TOPDIR}/drivers
 export IW30_TOPDIR=${ATH_TOPDIR}/apps/iw-3.0

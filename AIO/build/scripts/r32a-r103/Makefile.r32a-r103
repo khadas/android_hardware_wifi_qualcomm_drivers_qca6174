@@ -1,7 +1,6 @@
 # Build list
 
-targetList := drivers drivers_firmware
-targetList += rootfs_build 
+targetList := drivers
 
 default: ${targetList}
 
