@@ -133,7 +133,7 @@ NOSTDINC_FLAGS += \
 	$(CFLAGS)
 
 
-	TARGET_ALL := clean backports_build qcacld_build
+	TARGET_ALL := backports_build qcacld_build
 	TARGET_CLEAN := backports_clean qcacld_clean
 
 KERNEL_BACKPORT_PWD := $(ATH_DRIVER_TOPDIR)/$(CFG80211_NAME)
