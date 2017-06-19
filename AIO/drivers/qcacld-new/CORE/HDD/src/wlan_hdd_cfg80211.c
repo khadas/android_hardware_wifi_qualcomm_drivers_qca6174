@@ -14725,8 +14725,10 @@ wlan_hdd_cfg80211_inform_bss_frame( hdd_adapter_t *pAdapter,
     int rssi = 0;
     hdd_context_t *pHddCtx;
     int status;
-#ifdef CONFIG_CNSS
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 39))
     struct timespec ts;
+#else
+    struct timeval tv;
 #endif
     hdd_config_t *cfg_param = NULL;
 
@@ -14746,17 +14748,15 @@ wlan_hdd_cfg80211_inform_bss_frame( hdd_adapter_t *pAdapter,
 
     memcpy(mgmt->bssid, bss_desc->bssId, ETH_ALEN);
 
-#ifdef CONFIG_CNSS
-    /* Android does not want the time stamp from the frame.
-       Instead it wants a monotonic increasing value */
-    vos_get_monotonic_boottime_ts(&ts);
-    mgmt->u.probe_resp.timestamp =
-         ((u64)ts.tv_sec * 1000000) + (ts.tv_nsec / 1000);
-#else
-    /* keep old behavior for non-open source (for now) */
-    memcpy(&mgmt->u.probe_resp.timestamp, bss_desc->timeStamp,
-            sizeof (bss_desc->timeStamp));
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 39))
+    get_monotonic_boottime(&ts);
+    mgmt->u.probe_resp.timestamp = ((u64)ts.tv_sec*1000000)
+                                       + ts.tv_nsec / 1000;
+#else
+    do_gettimeofday(&tv);
+     mgmt->u.probe_resp.timestamp = ((u64)tv.tv_sec*1000000)
+                                        + tv.tv_usec;
 #endif
 
     mgmt->u.probe_resp.beacon_int = bss_desc->beaconInterval;
