@@ -148,6 +148,7 @@ struct hash_fw {
 	u8 utf[SHA256_DIGEST_SIZE];
 };
 
+void crash_dump_flush(const char* filename, char* buf, unsigned int len);
 int ol_target_coredump(void *instance, void* memoryBlock,
                         u_int32_t blockLength);
 int ol_diag_read(struct ol_softc *scn, u_int8_t* buffer,

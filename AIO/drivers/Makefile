@@ -133,7 +133,7 @@ NOSTDINC_FLAGS += \
 	$(CFLAGS)
 
 
-	TARGET_ALL := clean backports_build qcacld_build
+	TARGET_ALL := backports_build qcacld_build
 	TARGET_CLEAN := backports_clean qcacld_clean
 
 KERNEL_BACKPORT_PWD := $(ATH_DRIVER_TOPDIR)/$(CFG80211_NAME)
@@ -155,13 +155,13 @@ else
 endif
 
 #################################################################################################################################
-all: $(TARGET_ALL) firmware_install
+all: $(TARGET_ALL)
 
 clean: $(TARGET_CLEAN)
 
 # backport build for cfg80211
 backports_build:
-	${MAKEARCH} -C $(KERNEL_BACKPORT_PWD) SUBDIRS=$(KERNEL_BACKPORT_PWD) modules
+	${MAKEARCH} -C $(KERNEL_BACKPORT_PWD) SUBDIRS=$(KERNEL_BACKPORT_PWD) modules -j32
 
 backports_clean:
 	${MAKEARCH} -C $(KERNEL_BACKPORT_PWD) SUBDIRS=$(KERNEL_BACKPORT_PWD) clean
@@ -179,7 +179,7 @@ cfg80211_clean:
 # qcacld driver build
 #
 qcacld_build:
-	${MAKEARCH} -C $(KERNELPATH) SUBDIRS=$(ATH_QCACLD_TOPDIR) KBUILD_EXTRA_SYMBOLS=$(MODULE_SYMBOL_DIR)/Module.symvers modules  $(KBUILD_OPTIONS)
+	${MAKEARCH} -C $(KERNELPATH) SUBDIRS=$(ATH_QCACLD_TOPDIR) KBUILD_EXTRA_SYMBOLS=$(MODULE_SYMBOL_DIR)/Module.symvers modules  $(KBUILD_OPTIONS) -j32
 
 qcacld_clean:
 	${MAKEARCH} -C $(KERNELPATH) SUBDIRS=$(ATH_QCACLD_TOPDIR) clean

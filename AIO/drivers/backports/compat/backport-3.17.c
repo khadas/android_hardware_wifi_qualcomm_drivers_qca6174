@@ -12,19 +12,6 @@
 #include <linux/export.h>
 #include <linux/ktime.h>
 
-int bit_wait(void *word)
-{
-	schedule();
-	return 0;
-}
-EXPORT_SYMBOL_GPL(bit_wait);
-
-int bit_wait_io(void *word)
-{
-	io_schedule();
-	return 0;
-}
-EXPORT_SYMBOL_GPL(bit_wait_io);
 
 /**
  * ktime_get_raw - Returns the raw monotonic time in ktime_t format

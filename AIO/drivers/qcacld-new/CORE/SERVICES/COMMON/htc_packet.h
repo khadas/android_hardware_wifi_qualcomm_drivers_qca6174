@@ -115,6 +115,7 @@ typedef struct _HTC_PACKET {
                                               can pass the network buffer corresponding to the HTC packet
                                               lower layers may optimized the transfer knowing this is
                                               a network buffer */
+    A_UINT8         BundlePktnum;
 } HTC_PACKET;
 
 

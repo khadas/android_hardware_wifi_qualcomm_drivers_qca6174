@@ -54,7 +54,7 @@ struct bus_request_record {
 	u_int64_t time;
 };
 
-#define BUS_REQUEST_MAX_NUM                105
+#define BUS_REQUEST_MAX_NUM                163
 
 #define SDIO_CLOCK_FREQUENCY_DEFAULT       25000000
 #define SDWLAN_ENABLE_DISABLE_TIMEOUT      20
@@ -91,6 +91,10 @@ typedef enum {
 } HIF_MBOX_STATE;
 #endif
 
+#ifdef CONFIG_QCA_SDIO_OOB
+typedef void (*oob_irq_handler_t) (void *dev);
+#endif
+
 struct hif_device {
     struct sdio_func *func;
     spinlock_t asynclock;
@@ -122,6 +126,14 @@ struct hif_device {
     atomic_t   irqHandling;
     HIF_DEVICE_POWER_CHANGE_TYPE powerConfig;
     HIF_DEVICE_STATE DeviceState;
+#ifdef CONFIG_QCA_SDIO_OOB
+    oob_irq_handler_t oob_irq_handler;		/*Firmware will use GPIO10, Host will use what */
+    int oob_irq_num;                           /* oob wifi irq num */
+    struct task_struct *oob_task;              /* task to handle oob interrupts */
+    struct semaphore sem_oob;                  /* wake up for oob task */
+    int oob_shutdown;                          /* stop the oob task */
+    struct completion oob_completion;          /* oob thread completion */
+#endif
 #ifdef HIF_MBOX_SLEEP_WAR
     adf_os_atomic_t   mbox_state;
     adf_os_timer_t sleep_timer;
@@ -148,7 +160,7 @@ void HIFDumpCCCR(HIF_DEVICE *hif_device);
 #ifdef HIF_LINUX_MMC_SCATTER_SUPPORT
 
 #define MAX_SCATTER_REQUESTS             4
-#define MAX_SCATTER_ENTRIES_PER_REQ      16
+#define MAX_SCATTER_ENTRIES_PER_REQ      64
 #define MAX_SCATTER_REQ_TRANSFER_SIZE    32*1024
 
 typedef struct _HIF_SCATTER_REQ_PRIV {

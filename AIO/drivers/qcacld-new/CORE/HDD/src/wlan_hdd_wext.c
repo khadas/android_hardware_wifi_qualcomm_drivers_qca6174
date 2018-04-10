@@ -11357,7 +11357,7 @@ static int __iw_set_two_ints_getnone(struct net_device *dev,
             return 0;
         }
 
-        hdd_ctx->isLogpInProgress = true;
+        //hdd_ctx->isLogpInProgress = true;
         ret = process_wma_set_command_twoargs((int) pAdapter->sessionId,
                                               (int) GEN_PARAM_CRASH_INJECT,
                                               value[1], value[2], GEN_CMD);

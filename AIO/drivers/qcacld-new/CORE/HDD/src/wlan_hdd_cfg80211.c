@@ -27759,7 +27759,7 @@ static int __wlan_hdd_cfg80211_tdls_mgmt(struct wiphy *wiphy,
     int responder;
     unsigned long rc;
     tANI_U16 numCurrTdlsPeers;
-#if !(TDLS_MGMT_VERSION2) && (LINUX_VERSION_CODE < KERNEL_VERSION(3,15,0))
+#if !(TDLS_MGMT_VERSION2) && (LINUX_VERSION_CODE < KERNEL_VERSION(3,15,0)) && !defined(WITH_BACKPORTS)
     u32 peer_capability;
     peer_capability = 0;
 #endif

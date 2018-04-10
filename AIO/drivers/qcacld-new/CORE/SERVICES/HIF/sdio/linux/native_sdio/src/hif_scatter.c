@@ -219,60 +219,38 @@ static A_STATUS HifReadWriteScatter(HIF_DEVICE *device, HIF_SCATTER_REQ *pReq)
             return A_ERROR;
         }
 
-        AR_DEBUG_PRINTF(ATH_DEBUG_SCATTER, ("HIF-SCATTER: total len: %d Scatter Entries: %d\n",
-                            pReq->TotalLength, pReq->ValidScatterEntries));
+        AR_DEBUG_PRINTF(ATH_DEBUG_SCATTER, ("HIF-SCATTER: total len: %d Scatter "
+                                            "Entries: %d\n", pReq->TotalLength,
+                                            pReq->ValidScatterEntries));
 
         if (!(request & HIF_EXTENDED_IO)) {
-            AR_DEBUG_PRINTF(ATH_DEBUG_ERROR,
-                            ("HIF-SCATTER: Invalid command type: 0x%08x\n", request));
+            AR_DEBUG_PRINTF(ATH_DEBUG_ERROR, ("HIF-SCATTER: Invalid command "
+                                              "type: 0x%08x\n", request));
             break;
         }
 
         if (!(request & (HIF_SYNCHRONOUS | HIF_ASYNCHRONOUS))) {
-            AR_DEBUG_PRINTF(ATH_DEBUG_ERROR,
-                            ("HIF-SCATTER: Invalid execution mode: 0x%08x\n", request));
+            AR_DEBUG_PRINTF(ATH_DEBUG_ERROR, ("HIF-SCATTER: Invalid execution"
+                                              " mode: 0x%08x\n", request));
             break;
         }
 
         if (!(request & HIF_BLOCK_BASIS)) {
-            AR_DEBUG_PRINTF(ATH_DEBUG_ERROR,
-                            ("HIF-SCATTER: Invalid data mode: 0x%08x\n", request));
-            break;
-        }
-
-        if (pReq->TotalLength > MAX_SCATTER_REQ_TRANSFER_SIZE) {
-            AR_DEBUG_PRINTF(ATH_DEBUG_ERROR,
-                            ("HIF-SCATTER: Invalid length: %d \n", pReq->TotalLength));
+            AR_DEBUG_PRINTF(ATH_DEBUG_ERROR, ("HIF-SCATTER: Invalid data"
+                                              " mode: 0x%08x\n", request));
             break;
         }
 
         if (pReq->TotalLength == 0) {
+            AR_DEBUG_PRINTF(ATH_DEBUG_ERROR, ("HIF-SCATTER: Invalid"
+                                              " length: %d \n", pReq->TotalLength));
             A_ASSERT(FALSE);
             break;
         }
 
-            /* add bus request to the async list for the async I/O thread to process */
-        AddToAsyncList(device, pReqPriv->busrequest);
-
-        if (request & HIF_SYNCHRONOUS) {
-            AR_DEBUG_PRINTF(ATH_DEBUG_SCATTER, ("HIF-SCATTER: queued sync req: 0x%lX\n", (unsigned long)pReqPriv->busrequest));
-            /* signal thread and wait */
-            up(&device->sem_async);
-            if (down_interruptible(&pReqPriv->busrequest->sem_req) != 0) {
-                AR_DEBUG_PRINTF(ATH_DEBUG_ERROR,("HIF-SCATTER: interrupted! \n"));
-                /* interrupted, exit */
-                status = A_ERROR;
-                break;
-            } else {
-                status = pReq->CompletionStatus;
-            }
-        } else {
-            AR_DEBUG_PRINTF(ATH_DEBUG_SCATTER, ("HIF-SCATTER: queued async req: 0x%lX\n", (unsigned long)pReqPriv->busrequest));
-                /* wake thread, it will process and then take care of the async callback */
-            up(&device->sem_async);
-            status = A_OK;
-        }
-
+        sdio_claim_host(device->func);
+        DoHifReadWriteScatter(device, pReqPriv->busrequest);
+        sdio_release_host(device->func);
     } while (FALSE);
 
     if (A_FAILED(status) && (request & HIF_ASYNCHRONOUS)) {
@@ -291,6 +269,8 @@ A_STATUS SetupHIFScatterSupport(HIF_DEVICE *device, HIF_DEVICE_SCATTER_SUPPORT_I
     int                   i;
     HIF_SCATTER_REQ_PRIV *pReqPriv;
     BUS_REQUEST          *busrequest;
+
+    AR_DEBUG_PRINTF(ATH_DEBUG_SCATTER,("+%s\n", __func__));
 
     do {
         /* check if host supports scatter requests and it meets our requirements */

@@ -501,6 +501,7 @@ vos_sched_open
 )
 {
   VOS_STATUS  vStatus = VOS_STATUS_SUCCESS;
+  struct sched_param param = {.sched_priority = 99};
 /*-------------------------------------------------------------------------*/
   VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_INFO_HIGH,
              "%s: Opening the VOSS Scheduler",__func__);
@@ -589,6 +590,7 @@ vos_sched_open
   pSchedContext->TlshimRxThread = kthread_create(VosTlshimRxThread,
                                                  pSchedContext,
                                                  "VosTlshimRxThread");
+  sched_setscheduler(pSchedContext->TlshimRxThread, SCHED_FIFO, &param);
   if (IS_ERR(pSchedContext->TlshimRxThread))
   {
 

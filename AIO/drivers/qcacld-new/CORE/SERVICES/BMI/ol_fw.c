@@ -205,6 +205,7 @@ int get_fw_files_for_non_qc_pci_target(struct non_qc_platform_pci_fw_files *pfw_
 	return 0;
 }
 #endif
+extern int qca_request_firmware(const struct firmware **firmware_p, const char *name,struct device *device);  
 #ifdef HIF_USB
 static A_STATUS ol_usb_extra_initialization(struct ol_softc *scn);
 #endif
@@ -250,7 +251,7 @@ static int ol_transfer_single_bin_file(struct ol_softc *scn,
 				__func__));
 	}
 
-	if (request_firmware(&fw_entry, filename, scn->sc_osdev->device) != 0)
+	if (qca_request_firmware(&fw_entry, filename, scn->sc_osdev->device) != 0)
 	{
 		AR_DEBUG_PRINTF(ATH_DEBUG_ERR,
 				("%s: Failed to get %s\n",
@@ -741,7 +742,7 @@ defined(CONFIG_NON_QC_PLATFORM_PCI)
 		break;
 	}
 
-       status = request_firmware(&fw_entry, filename, scn->sc_osdev->device);
+       status = qca_request_firmware(&fw_entry, filename, scn->sc_osdev->device);
 	if (status)
 	{
 		pr_err("%s: Failed to get %s:%d\n", __func__, filename, status);
@@ -762,7 +763,7 @@ defined(CONFIG_NON_QC_PLATFORM_PCI)
 			pr_info("%s: Trying to load default %s\n",
 							__func__, filename);
 
-			status = request_firmware(&fw_entry, filename,
+			status = qca_request_firmware(&fw_entry, filename,
 					scn->sc_osdev->device);
 			if (status) {
 				pr_err("%s: Failed to get %s:%d\n",
@@ -1209,7 +1210,7 @@ static void ramdump_work_handler(struct work_struct *ramdump)
 	printk("%s: RAM dump collecting completed!\n", __func__);
 
 #if (defined(HIF_SDIO) || defined(CONFIG_NON_QC_PLATFORM_PCI)) && !defined(CONFIG_CNSS)
-	panic("CNSS Ram dump collected\n");
+	//panic("CNSS Ram dump collected\n");
 #else
 	/* Notify SSR framework the target has crashed. */
 	vos_device_crashed(dev);
@@ -1564,7 +1565,7 @@ void ol_target_failure(void *instance, A_STATUS status)
 	}
 #endif
 
-	vos_set_logp_in_progress(VOS_MODULE_ID_VOSS, TRUE);
+	//vos_set_logp_in_progress(VOS_MODULE_ID_VOSS, TRUE);
 	if (vos_is_load_unload_in_progress(VOS_MODULE_ID_VOSS, NULL)) {
 		printk("%s: Loading/Unloading is in progress, ignore!\n",
 			__func__);
@@ -2729,6 +2730,91 @@ static int ol_dump_fail_debug_info(struct ol_softc *scn, void *ptr)
 }
 #endif
 
+#define GET_INODE_FROM_FILEP(filp) ((filp)->f_path.dentry->d_inode)
+
+int _readwrite_file(const char *filename, char *rbuf,
+	const char *wbuf, size_t length, int mode)
+{
+	int ret = 0;
+	struct file *filp = (struct file *)-ENOENT;
+	mm_segment_t oldfs;
+	oldfs = get_fs();
+	set_fs(KERNEL_DS);
+
+	do {
+		filp = filp_open(filename, mode, S_IRUSR);
+
+		if (IS_ERR(filp) || !filp->f_op) {
+			ret = -ENOENT;
+			break;
+		}
+
+		if (length == 0) {
+			/* Read the length of the file only */
+			struct inode    *inode;
+
+			inode = GET_INODE_FROM_FILEP(filp);
+			if (!inode) {
+				printk(KERN_ERR
+					"_readwrite_file: Error 2\n");
+				ret = -ENOENT;
+				break;
+			}
+			ret = i_size_read(inode->i_mapping->host);
+			break;
+		}
+
+		if (wbuf) {
+			ret = vfs_write(
+				filp, wbuf, length, &filp->f_pos);
+			if (ret < 0) {
+				printk(KERN_ERR
+					"_readwrite_file: Error 3\n");
+				break;
+			}
+		} else {
+			ret = vfs_read(
+				filp, rbuf, length, &filp->f_pos);
+			if (ret < 0) {
+				printk(KERN_ERR
+					"_readwrite_file: Error 4\n");
+				break;
+			}
+		}
+	} while (0);
+
+	if (!IS_ERR(filp)) {
+		filp_close(filp, NULL);
+	}
+
+	set_fs(oldfs);
+	return ret;
+}
+#define CRASH_DUMP_PATH "/data/"
+
+static void crash_dump_file_init(const char* filename)
+{
+	int ret;
+
+	ret = _readwrite_file(filename, NULL,
+	                NULL, 0, (O_WRONLY | O_CREAT | O_TRUNC));
+	if (ret < 0) {
+		printk("%s:%d: fail to write\n", __func__, __LINE__);
+	}
+
+}
+void crash_dump_flush(const char* filename, char* buf, unsigned int len)
+{
+	int ret;
+	ret = _readwrite_file(filename, NULL,
+	                      buf,
+	                      len,
+	                      (O_WRONLY | O_APPEND));
+	if (ret < 0) {
+		printk("%s:%d: fail to write\n", __func__, __LINE__);
+	}
+}
+
 /**---------------------------------------------------------------------------
  *   \brief  ol_target_coredump
  *
@@ -2751,11 +2837,15 @@ int ol_target_coredump(void *inst, void *memoryBlock, u_int32_t blockLength)
 	uint32_t pos = 0;
 	uint32_t readLen = 0;
 	uint32_t max_count = ol_get_max_section_count(scn);
+	char fw_dump_filename[40];
 
 #ifdef CONFIG_NON_QC_PLATFORM_PCI
 
 	char *fw_ram_seg_name[] = {"DRAM ", "AXI ", "REG ", "IRAM1 ", "IRAM2 "};
+#else
+	char *fw_ram_seg_name[] = {"DRAM", "AXI", "REG", "IRAM"};
 #endif
+
 	while ((sectionCount < max_count) && (amountRead < blockLength)) {
 		switch (sectionCount) {
 		case 0:
@@ -2788,6 +2878,11 @@ int ol_target_coredump(void *inst, void *memoryBlock, u_int32_t blockLength)
 			       sectionCount);
 			return 0;
 		}
+        memset(fw_dump_filename, 0, sizeof(fw_dump_filename));
+        scnprintf(fw_dump_filename, sizeof(fw_dump_filename), "%scld_%s.bin",
+                  CRASH_DUMP_PATH, fw_ram_seg_name[sectionCount]);
+        if(sectionCount != 2)
+            crash_dump_file_init(fw_dump_filename);
 
 		if (blockLength - amountRead < readLen) {
 			pr_err("%s: No memory to dump section:%d buffer!\n",
@@ -2811,6 +2906,9 @@ int ol_target_coredump(void *inst, void *memoryBlock, u_int32_t blockLength)
 		print_hex_dump(KERN_DEBUG, fw_ram_seg_name[sectionCount],
 				DUMP_PREFIX_ADDRESS, 16, 4, bufferLoc, result, false);
 #endif
+        if(sectionCount != 2) {
+            crash_dump_flush(fw_dump_filename, bufferLoc, result);
+        }
 		amountRead += result;
 		bufferLoc += result;
 		sectionCount++;

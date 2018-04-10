@@ -335,6 +335,20 @@ HTCSendCompleteCheck(HTC_ENDPOINT *pEndpoint, int force)
 }
 #endif
 
+#define HTC_RECYCLE_RX_PKT(target,p,e)                           \
+{                                                                \
+    if ((p)->PktInfo.AsRx.HTCRxFlags & HTC_RX_PKT_NO_RECYCLE) {  \
+         HTC_PACKET_RESET_RX(pPacket);                           \
+         pPacket->Status = A_ECANCELED;                          \
+         (e)->EpCallBacks.EpRecv((e)->EpCallBacks.pContext,      \
+                                 (p));                           \
+    } else {                                                     \
+        HTC_PACKET_RESET_RX(pPacket);                            \
+        HTCAddReceivePkt((HTC_HANDLE)(target),(p));              \
+    }                                                            \
+}
+
+
 #ifndef DEBUG_BUNDLE
 #define DEBUG_BUNDLE 0
 #endif

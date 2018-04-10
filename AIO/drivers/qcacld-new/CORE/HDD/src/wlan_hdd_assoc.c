@@ -1169,6 +1169,11 @@ hdd_SendUpdateBeaconIEsEvent(hdd_adapter_t *pAdapter,
     vos_mem_free(buff);
 }
 
+extern void crash_dump_flush(const char* filename, char* buf, unsigned int len);
+char tcp_rmem_24g[] = "10240 87380 524288";
+char tcp_rmem_5g[] = "10240 87380 6291456";
+char *tcp_rmem = NULL;
+int tcp_rmem_len = 0;
 static void hdd_SendAssociationEvent(struct net_device *dev,tCsrRoamInfo *pCsrRoamInfo)
 {
     hdd_adapter_t *pAdapter = WLAN_HDD_GET_PRIV_PTR(dev);
@@ -1284,6 +1289,47 @@ static void hdd_SendAssociationEvent(struct net_device *dev,tCsrRoamInfo *pCsrRo
                                       pCsrRoamInfo->tdls_chan_swit_prohibited);
         }
 #endif
+        if (pAdapter->device_mode == WLAN_HDD_INFRA_STATION) {
+            if(pCsrRoamInfo->chan_info.mhz > 2484) {
+                crash_dump_flush("/proc/sys/net/ipv4/tcp_use_userconfig", "1", 1);
+                crash_dump_flush("/proc/sys/net/ipv4/tcp_delack_seg", "60", 2);
+
+                crash_dump_flush("/proc/sys/net/core/wmem_max", "6291456", 7);
+                crash_dump_flush("/proc/sys/net/core/wmem_default", "6291456", 7);
+                crash_dump_flush("/proc/sys/net/core/rmem_max", "6291456", 7);
+                crash_dump_flush("/proc/sys/net/core/rmem_default", "6291456", 7);
+
+                crash_dump_flush("/proc/sys/net/ipv4/tcp_mem", "6291456 6291456 6291456", 23);
+                tcp_rmem = &tcp_rmem_5g[0];
+                tcp_rmem_len = 19;
+                crash_dump_flush("/proc/sys/net/ipv4/tcp_rmem", "10240 87380 6291456", 19);
+                crash_dump_flush("/proc/sys/net/ipv4/tcp_wmem", "10240 87380 6291456", 19);
+                crash_dump_flush("/proc/sys/net/ipv4/tcp_limit_output_bytes", "131072", 6);
+                crash_dump_flush("/proc/sys/net/ipv4/route/flush", "1", 1);
+                crash_dump_flush("/proc/sys/net/ipv4/tcp_sack", "0", 1);
+            }
+            else {
+                crash_dump_flush("/proc/sys/net/ipv4/tcp_use_userconfig", "0", 1);
+
+                crash_dump_flush("/proc/sys/net/core/wmem_max", "524288", 6);
+                crash_dump_flush("/proc/sys/net/core/wmem_default", "524288", 6);
+                crash_dump_flush("/proc/sys/net/core/rmem_max", "524288", 6);
+                crash_dump_flush("/proc/sys/net/core/rmem_default", "524288", 6);
+
+                crash_dump_flush("/proc/sys/net/ipv4/tcp_mem", "524288 524288 524288", 20);
+                tcp_rmem = &tcp_rmem_24g[0];
+                tcp_rmem_len = 18;
+                crash_dump_flush("/proc/sys/net/ipv4/tcp_rmem", "10240 87380 524288", 18);
+                crash_dump_flush("/proc/sys/net/ipv4/tcp_wmem", "10240 87380 524288", 18);
+                crash_dump_flush("/proc/sys/net/ipv4/tcp_limit_output_bytes", "131072", 6);
+                crash_dump_flush("/proc/sys/net/ipv4/route/flush", "1", 1);
+                crash_dump_flush("/proc/sys/net/ipv4/tcp_sack", "0", 1);
+            }
+            crash_dump_flush("/sys/bus/cpu/devices/cpu0/online", "1", 1);
+            crash_dump_flush("/sys/bus/cpu/devices/cpu1/online", "1", 1);
+            crash_dump_flush("/sys/bus/cpu/devices/cpu2/online", "1", 1);
+            crash_dump_flush("/sys/bus/cpu/devices/cpu3/online", "1", 1);
+        }
 
 #ifdef FEATURE_BUS_BANDWIDTH
         /* start timer in sta/p2p_cli */

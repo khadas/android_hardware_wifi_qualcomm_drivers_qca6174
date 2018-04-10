@@ -26,6 +26,7 @@
  */
 
 #define ATH_MODULE_NAME hif
+#include <linux/kthread.h>
 #include "a_debug.h"
 
 #include <adf_os_types.h>
@@ -48,9 +49,11 @@
 #include <a_osapi.h>
 #include <hif.h>
 #include <htc_services.h>
+#include <htc_internal.h>
 #include "hif_sdio_internal.h"
 #include "if_ath_sdio.h"
 #include "regtable.h"
+#include "vos_sched.h"
 
 /* under HL SDIO, with Interface Memory support, we have the following
  * reasons to support 2 mboxs: a) we need place different buffers in different
@@ -162,6 +165,89 @@ HTC_PACKET *HIFDevAllocRxBuffer(HIF_SDIO_DEVICE *pDev, size_t length)
     return pPacket;
 }
 
+/**
+ * rx_completion_sem_init() - initialize rx completion semaphore
+ * @device:  device handle.
+ *
+ * Initialize semaphore for RX completion thread's synchronization.
+ *
+ * Return: None.
+ */
+static inline void rx_completion_sem_init(HIF_SDIO_DEVICE *pDev)
+{
+#if HIF_RX_THREAD_V2
+	spin_lock_init(&pDev->pRecvTask->rx_bundle_lock);
+	spin_lock_init(&pDev->pRecvTask->rx_sync_completion_lock);
+#else
+	spin_lock_init(&pDev->pRecvTask->rx_completion_lock);
+#endif
+	sema_init(&pDev->pRecvTask->sem_rx_completion, 0);
+}
+extern int rx_completion_task(void *param);
+
+/**
+ * hif_start_tx_completion_thread() - Create and start the RX compl thread
+ * @pDev:   pDev handle.
+ *
+ * This function will create the rx completion thread.
+ *
+ * Return: A_OK     thread created.
+ *         A_ERROR  thread not created.
+ */
+static inline int hif_start_rx_completion_thread(HIF_SDIO_DEVICE *pDev)
+{
+    struct sched_param param = {.sched_priority = 99};
+	if (!pDev->pRecvTask->rx_completion_task) {
+		pDev->pRecvTask->rx_completion_shutdown = 0;
+		pDev->pRecvTask->rx_completion_task = kthread_create(rx_completion_task,
+			(void *)pDev,	"AR6K RxCompletion");
+        sched_setscheduler(pDev->pRecvTask->rx_completion_task, SCHED_FIFO, &param);
+		if (IS_ERR(pDev->pRecvTask->rx_completion_task)) {
+			pDev->pRecvTask->rx_completion_shutdown = 1;
+			AR_DEBUG_PRINTF(ATH_DEBUG_ERROR,
+			("AR6000: fail to create rx_comple task\n"));
+			pDev->pRecvTask->rx_completion_task = NULL;
+			return A_ERROR;
+		}
+		AR_DEBUG_PRINTF(ATH_DEBUG_TRACE,
+			("AR6000: start rx_comple task\n"));
+		wake_up_process(pDev->pRecvTask->rx_completion_task);
+	}
+	return A_OK;
+}
+
+/*
+ * hif_stop_rx_completion_thread() - Destroy the rx compl thread
+ * @pDev: pDev handle.
+ *
+ * This function will destroy the RX completion thread.
+ *
+ * Return: None.
+ */
+static inline void hif_stop_rx_completion_thread(HIF_SDIO_DEVICE *pDev)
+{
+#if HIF_ASYNC_ALLOC
+    HTC_PACKET *pPacket;
+#endif
+	if (pDev->pRecvTask->rx_completion_task) {
+		init_completion(&pDev->pRecvTask->rx_completion_exit);
+		pDev->pRecvTask->rx_completion_shutdown = 1;
+		up(&pDev->pRecvTask->sem_rx_completion);
+		wait_for_completion(&pDev->pRecvTask->rx_completion_exit);
+		pDev->pRecvTask->rx_completion_task = NULL;
+		sema_init(&pDev->pRecvTask->sem_rx_completion, 0);
+	}
+#if HIF_ASYNC_ALLOC
+    while(!HTC_QUEUE_EMPTY(&pDev->pRecvTask->rxAllocQueue)) {
+        pPacket = HTC_PACKET_DEQUEUE(&pDev->pRecvTask->rxAllocQueue);
+        if(pPacket == NULL)
+            break;
+        adf_nbuf_free(pPacket->pNetBufContext);
+    }
+#endif
+}
+
+struct hif_recv_task gRecvTask;
 HIF_SDIO_DEVICE* HIFDevCreate(HIF_DEVICE *hif_device,
         MSG_BASED_HIF_CALLBACKS *callbacks,
         void *target)
@@ -183,6 +269,25 @@ HIF_SDIO_DEVICE* HIFDevCreate(HIF_DEVICE *hif_device,
 
     pDev->HIFDevice = hif_device;
     pDev->pTarget = target;
+
+    pDev->pRecvTask = &gRecvTask;
+#if HIF_RX_THREAD
+    pDev->pRecvTask->rx_completion_task = NULL;
+    rx_completion_sem_init(pDev);
+#if HIF_RX_THREAD_V2
+    INIT_HTC_PACKET_QUEUE(&pDev->pRecvTask->rxBundleQueue);
+    INIT_HTC_PACKET_QUEUE(&pDev->pRecvTask->rxSyncCompletionQueue);
+#else
+    INIT_HTC_PACKET_QUEUE(&pDev->pRecvTask->rxComQueue);
+#endif
+    hif_start_rx_completion_thread(pDev);
+#endif
+
+#if HIF_ASYNC_ALLOC
+	spin_lock_init(&pDev->pRecvTask->rx_alloc_lock);
+    INIT_HTC_PACKET_QUEUE(&pDev->pRecvTask->rxAllocQueue);
+#endif
+
     status = HIFConfigureDevice(hif_device,
             HIF_DEVICE_SET_HTC_CONTEXT,
             (void*) pDev,
@@ -200,7 +305,9 @@ HIF_SDIO_DEVICE* HIFDevCreate(HIF_DEVICE *hif_device,
 void HIFDevDestroy(HIF_SDIO_DEVICE *pDev)
 {
     A_STATUS status;
-
+#if HIF_RX_THREAD
+    hif_stop_rx_completion_thread(pDev);
+#endif
     status = HIFConfigureDevice(pDev->HIFDevice,
             HIF_DEVICE_SET_HTC_CONTEXT,
             (void*) NULL,
@@ -421,5 +528,128 @@ A_STATUS HIFDevSetup(HIF_SDIO_DEVICE *pDev)
 
     EXIT();
     return status;
+}
+
+
+A_STATUS HIFDevSetupMsgBundling(HIF_SDIO_DEVICE *pDev)
+{
+    A_STATUS status;
+
+    AR_DEBUG_PRINTF(ATH_DEBUG_INFO, ("+%s - pDev = %p\n", __func__, pDev));
+
+    if (pDev->MailBoxInfo.Flags & HIF_MBOX_FLAG_NO_BUNDLING)
+    {
+        AR_DEBUG_PRINTF(ATH_DEBUG_WARN, ("HIF requires bundling disabled\n"));
+        return A_ENOTSUP;
+    }
+
+    status = HIFConfigureDevice(pDev->HIFDevice,
+                                HIF_CONFIGURE_QUERY_SCATTER_REQUEST_SUPPORT,
+                                &pDev->HifScatterInfo,
+                                sizeof(pDev->HifScatterInfo));
+
+    if (A_FAILED(status))
+    {
+        AR_DEBUG_PRINTF(ATH_DEBUG_WARN,
+            ("HIF layer does not support scatter requests (%d) \n",status));
+    } else
+    {
+        AR_DEBUG_PRINTF(ATH_DEBUG_INFO,
+            ("AR6K: HIF layer supports scatter requests (max scatter items:%d: maxlen:%d) \n",
+                    DEV_GET_MAX_MSG_PER_BUNDLE(pDev), DEV_GET_MAX_BUNDLE_LENGTH(pDev)));
+    }
+
+    return status;
+}
+
+A_STATUS HIFDevSubmitScatterRequest(HIF_SDIO_DEVICE *pDev, HIF_SCATTER_REQ *pScatterReq,
+                                    A_BOOL Read, A_BOOL Async)
+{
+    A_STATUS status;
+
+    HTC_TARGET *target;
+    target = (HTC_TARGET *)pDev->pTarget;
+     //AR_DEBUG_PRINTF(ATH_DEBUG_ERROR, ("+%s\n", __func__));
+
+    if (Read)
+    {
+            /* read operation */
+        pScatterReq->Request = (Async) ? HIF_RD_ASYNC_BLOCK_FIX : HIF_RD_SYNC_BLOCK_FIX;
+        pScatterReq->Address = pDev->MailBoxInfo.MboxAddresses[HTC_MAILBOX];
+        A_ASSERT(pScatterReq->TotalLength < (HTC_MAX_MSG_PER_BUNDLE_RX * target->TargetCreditSize));
+    }
+
+    AR_DEBUG_PRINTF(ATH_DEBUG_SCATTER,
+                ("%s, Entries: %d, Total Length: %d Mbox:0x%X (mode: %s : %s)\n",
+                __func__, pScatterReq->ValidScatterEntries,
+                pScatterReq->TotalLength,
+                pScatterReq->Address,
+                Async ? "ASYNC" : "SYNC",
+                (Read) ? "RD" : "WR"));
+
+    status = DEV_PREPARE_SCATTER_OPERATION(pScatterReq);
+
+    if (A_FAILED(status)) {
+        if (Async) {
+            pScatterReq->CompletionStatus = status;
+            pScatterReq->CompletionRoutine(pScatterReq);
+            return A_OK;
+        }
+        return status;
+    }
+
+    status = pDev->HifScatterInfo.pReadWriteScatterFunc(pDev->HIFDevice, pScatterReq);
+
+    if (!Async) {
+            /* in sync mode, we can touch the scatter request */
+        pScatterReq->CompletionStatus = status;
+        DEV_FINISH_SCATTER_OPERATION(pScatterReq);
+    } else {
+        if (status == A_PENDING) {
+            status = A_OK;
+        }
+    }
+
+    return status;
+}
+
+A_STATUS HIFDevCopyScatterListToFromDMABuffer(HIF_SCATTER_REQ *pReq, A_BOOL FromDMA)
+{
+    A_UINT8         *pDMABuffer = NULL;
+    int             i, remaining;
+    A_UINT32        length;
+
+    pDMABuffer = pReq->pScatterBounceBuffer;
+
+    if (pDMABuffer == NULL) {
+        A_ASSERT(FALSE);
+        return A_EINVAL;
+    }
+
+    remaining = (int)pReq->TotalLength;
+
+    for (i = 0; i < pReq->ValidScatterEntries; i++) {
+
+        length = min((int)pReq->ScatterList[i].Length, remaining);
+
+        if (length != (int)pReq->ScatterList[i].Length) {
+            A_ASSERT(FALSE);
+                /* there is a problem with the scatter list */
+            return A_EINVAL;
+        }
+
+        if (FromDMA) {
+                /* from DMA buffer */
+            A_MEMCPY(pReq->ScatterList[i].pBuffer, pDMABuffer , length);
+        } else {
+                /* to DMA buffer */
+            A_MEMCPY(pDMABuffer, pReq->ScatterList[i].pBuffer, length);
+        }
+
+        pDMABuffer += length;
+        remaining -= length;
+    }
+
+    return A_OK;
 }
 

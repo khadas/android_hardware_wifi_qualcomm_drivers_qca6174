@@ -49,6 +49,7 @@
 #include "hif_sdio_dev.h"
 #include "if_ath_sdio.h"
 #include "regtable.h"
+#include "hif_sdio_internal.h"
 
 #define ATH_MODULE_NAME hif_sdio
 
@@ -119,6 +120,10 @@ void HIFPostInit(HIF_DEVICE *hif_device, void *target,
 
     if (htc_sdio_device)
     HIFDevSetup(htc_sdio_device);
+
+#if HIF_SCATTER_GATHER
+    HIFDevSetupMsgBundling(htc_sdio_device);
+#endif
 
     return;
 }

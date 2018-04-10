@@ -25,6 +25,8 @@
  * to the Linux Foundation.
  */
 
+#include <linux/gpio.h>
+#include <linux/of_gpio.h>
 #include <linux/mmc/card.h>
 #include <linux/mmc/mmc.h>
 #include <linux/mmc/host.h>
@@ -40,6 +42,8 @@
 #include "wma_api.h"
 #include "hif_internal.h"
 #include "adf_os_time.h"
+#include "hif_sdio_dev.h"
+#include "hif_sdio_internal.h"
 /* by default setup a bounce buffer for the data packets, if the underlying host controller driver
    does not use DMA you may be able to skip this step and save the memory allocation and transfer time */
 #define HIF_USE_DMA_BOUNCE_BUFFER 1
@@ -166,7 +170,7 @@ static int Func0_CMD52ReadByte(struct mmc_card *card, unsigned int address, unsi
 int reset_sdio_on_unload = 0;
 module_param(reset_sdio_on_unload, int, 0644);
 
-A_UINT32 nohifscattersupport = 1;
+A_UINT32 nohifscattersupport = 0;
 
 A_UINT32 forcedriverstrength = 1; /* force driver strength to type D */
 
@@ -314,6 +318,155 @@ ATH_DEBUG_INSTANTIATE_MODULE_VAR(hif,
 
 #endif
 
+#ifdef CONFIG_QCA_SDIO_OOB
+#define PENDING_IRQ_GPIO_PIN		241/* Customers need to adjust themselves by board */
+extern int wifi_irq_num(void);			/* Customer needs to realize the function by themselves */
+
+/*
+ * get the GPIO level of OOB interrupt PIN
+ *
+ * Note:  CPU & WIFI module has a reverse circuits.
+ *
+ * return:  1   PIN Low Level  (Have Interupt)
+ *          0   PIN High Level
+ */
+static inline int wlan_get_pending_irq(void)
+{
+    int ret = 0;
+    ret = gpio_get_value(PENDING_IRQ_GPIO_PIN);		/* gpio_get_value(unsigned gpio) */	
+    //printk(KERN_ERR "PENDING_IRQ_GPIO_PIN: %d\n", ret);
+    return ret;
+}
+
+/* thread to handle all the oob interrupts */
+#define OOB_MAX_IRQ_PENDING_COUNT 100
+static int oob_task(void *oob)
+{
+   HIF_DEVICE *device = (HIF_DEVICE*)oob;
+	unsigned long oob_loop_count = 0, irq_pending_count = 0, irq_statistics[OOB_MAX_IRQ_PENDING_COUNT] = {0};
+	struct sched_param param = { .sched_priority = 99 };
+
+	sched_setscheduler(current, SCHED_FIFO, &param);
+
+   printk(KERN_ERR "oob_task enter\n");
+
+	while (!device->oob_shutdown) {
+		oob_loop_count++;
+		irq_pending_count = 0;
+		if (down_interruptible(&device->sem_oob) != 0)
+			continue;
+        if ( likely(device->oob_irq_handler) ) {
+
+            //1. host platform require low level trigger interrupt
+            //2. need host platform pad pull low
+			while (wlan_get_pending_irq() == 0) {
+				device->oob_irq_handler(device->func);
+				irq_pending_count++;
+			}
+
+           enable_irq(device->oob_irq_num);
+
+			if (irq_pending_count < OOB_MAX_IRQ_PENDING_COUNT)
+				irq_statistics[irq_pending_count]++;
+			else
+				irq_statistics[0]++;
+#ifdef CNSS_SDIO_OOB_STATIS
+			if (oob_loop_count % 10000 == 0) {
+				int count;
+				for (count = 0; count < OOB_MAX_IRQ_PENDING_COUNT; count++) {
+				if (irq_statistics[count] > 0)
+					pr_info("%s: irq_statistics[%d]=%lu\n", __func__, count, irq_statistics[count]);
+				}
+			}
+#endif
+		} else {
+			pr_err("%s: irq callback isn't registerred or paramter is NULL\n", __func__);
+		}
+	}
+
+	complete_and_exit(&device->oob_completion, 0);
+
+   printk(KERN_ERR "oob_task exit\n");
+	return 0;
+}
+
+static irqreturn_t wlan_oob_irq(int irq, void *dev)
+{
+    HIF_DEVICE *device = (HIF_DEVICE*)dev;
+
+    //printk(KERN_ERR "wlan_oob_irq\n");
+    disable_irq_nosync(irq);
+
+    up(&device->sem_oob);
+    return IRQ_HANDLED;
+}
+
+static int wlan_oob_irq_get(HIF_DEVICE *device)
+{
+    if (device->oob_task) {
+	pr_err("%s: oob_task is already running\n", __func__);
+    }else{
+        int ret = -1;
+	pr_info("%s: try to create the oob task\n", __func__);
+	device->oob_shutdown = 0;
+	device->oob_task = kthread_create(oob_task, (void*)device, "koobirqd");
+	if (IS_ERR(device->oob_task)) {
+		pr_err("%s: fail to create oob task\n", __func__);
+		device->oob_task = NULL;
+                return -1;
+	} else {
+		wake_up_process(device->oob_task);
+		pr_info("%s: successfully start oob task\n", __func__);
+        }
+        device->oob_irq_num = wifi_irq_num();
+        ret = request_irq( device->oob_irq_num, wlan_oob_irq, IRQF_TRIGGER_NONE , "oob_irq", (void*)device);
+        if (ret) {
+            pr_err("%s: fail to request_irq\n",__func__);
+	    return -1;
+        }
+    }
+    pr_info("%s: wlan_oob_irq_get exit\n", __func__);
+    return 0;
+}
+
+static int wlan_oob_irq_put(HIF_DEVICE *device)
+{
+    pr_err("%s enter\n", __func__);
+
+    if (!device->oob_task) {
+        pr_err("%s: oob_task is NULL which is unexpected\n", __func__);
+    } else {
+        free_irq( device->oob_irq_num, (void*)device);
+	pr_info("%s: try to kill the oob task\n", __func__);
+	init_completion(&device->oob_completion);
+	device->oob_shutdown = 1;
+	up(&device->sem_oob);
+	wait_for_completion(&device->oob_completion);
+	device->oob_task = NULL;
+    }
+
+    pr_err("%s exit\n", __func__);
+    return 0;
+}
+
+static int wlan_register_oob_irq_handler(struct sdio_func *func, oob_irq_handler_t handler)
+{
+    HIF_DEVICE *device = getHifDevice(func);
+    device->oob_irq_handler = handler;
+    wlan_oob_irq_get(device);
+    return 0;
+}
+
+static int wlan_unregister_oob_irq_handler(struct sdio_func *func)
+{
+    HIF_DEVICE * device = getHifDevice(func);
+    wlan_oob_irq_put(device);
+    device->oob_irq_handler = NULL;
+    return 0;
+}
+
+#endif
+
 #if defined(CONFIG_CNSS) && defined(HIF_SDIO)
 static int hif_sdio_register_driver(OSDRV_CALLBACKS *callbacks)
 {
@@ -381,6 +534,18 @@ A_STATUS HIFInit(OSDRV_CALLBACKS *callbacks)
     return A_OK;
 }
 
+#if HIF_COSTTIME
+extern unsigned long gt0;
+extern unsigned long gt1;
+extern unsigned long gt2;
+extern unsigned long gt3;
+extern unsigned long gt4;
+extern unsigned long gt5;
+extern unsigned long gt6;
+extern unsigned long gt7;
+extern int gBundleCnt;
+extern int gMaxBundleCnt;
+#endif
 static A_STATUS
 __HIFReadWrite(HIF_DEVICE *device,
              A_UINT32 address,
@@ -394,6 +559,9 @@ __HIFReadWrite(HIF_DEVICE *device,
     int ret = 0;
     A_UINT8 *tbuffer;
     A_BOOL   bounced = FALSE;
+#if HIF_COSTTIME
+    struct timeval tv;
+#endif
 
     if (device == NULL || device->func == NULL)
         return A_ERROR;
@@ -551,7 +719,24 @@ __HIFReadWrite(HIF_DEVICE *device,
 #endif
             if (tbuffer != NULL) {
                 if (opcode == CMD53_FIXED_ADDRESS) {
+#if HIF_COSTTIME
+                    do_gettimeofday(&tv);
+                    gt2 = tv.tv_sec*1000000 + tv.tv_usec;
+                    printk("memcpy cost %lu us + rxcomp cost %lu us + alloc cost %lu us \n", gt6-gt3, gt5-gt4, gt2-gt1);
+                    if(gt2 > gt3)
+                        printk("bundle read gap %lu us lastread-dsr %lu us dsr-regread %lu us regread-dataread %lu us\n", 
+                                gt2-gt3, gt0-gt3, gt7-gt0, gt2-gt7);
+#endif
                     ret = sdio_readsb(device->func, tbuffer, address, length);
+
+#if HIF_COSTTIME
+                    do_gettimeofday(&tv);
+                    gt3 = tv.tv_sec*1000000 + tv.tv_usec;
+                    gBundleCnt++;
+                    if(gMaxBundleCnt < gBundleCnt)
+                        gMaxBundleCnt = gBundleCnt;
+                    printk("bundle read cost %lu us gBundleCnt %d max %d\n", gt3-gt2, gBundleCnt, gMaxBundleCnt);
+#endif
                     AR_DEBUG_PRINTF(ATH_DEBUG_TRACE,
                               ("AR6000: readsb ret=%d address: 0x%X, len: %d, 0x%X\n",
                               ret, address, length, *(int *)tbuffer));
@@ -882,12 +1067,14 @@ static inline void hif_free_bus_request(HIF_DEVICE *device,
  */
 static inline int hif_start_tx_completion_thread(HIF_DEVICE *device)
 {
+	struct sched_param param = {.sched_priority = 99};
 	if (!device->tx_completion_task) {
 		device->tx_completion_req = NULL;
 		device->last_tx_completion = &device->tx_completion_req;
 		device->tx_completion_shutdown = 0;
 		device->tx_completion_task = kthread_create(tx_completion_task,
 			(void *)device,	"AR6K TxCompletion");
+		sched_setscheduler(device->tx_completion_task, SCHED_FIFO, &param);
 		if (IS_ERR(device->tx_completion_task)) {
 			device->tx_completion_shutdown = 1;
 			AR_DEBUG_PRINTF(ATH_DEBUG_ERROR,
@@ -1108,7 +1295,7 @@ A_STATUS ReinitSDIO(HIF_DEVICE *device)
             err = Func0_CMD52ReadByte(card, SDIO_CCCR_SPEED, &cmd52_resp);
             if (err) {
                 AR_DEBUG_PRINTF(ATH_DEBUG_ERR, ("ReinitSDIO: CMD52 read to CCCR speed register failed  : %d \n",err));
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,16,0))
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,16,0))  && !defined(WITH_BACKPORTS)
                 card->state &= ~MMC_STATE_HIGHSPEED;
 #endif
                 /* no need to break */
@@ -1118,7 +1305,7 @@ A_STATUS ReinitSDIO(HIF_DEVICE *device)
                     AR_DEBUG_PRINTF(ATH_DEBUG_ERR, ("ReinitSDIO: CMD52 write to CCCR speed register failed  : %d \n",err));
                     break;
                 }
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,16,0))
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,16,0))  && !defined(WITH_BACKPORTS)
                 mmc_card_set_highspeed(card);
 #endif
                 host->ios.timing = MMC_TIMING_SD_HS;
@@ -1127,7 +1314,7 @@ A_STATUS ReinitSDIO(HIF_DEVICE *device)
         }
 
         /* Set clock */
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,16,0))
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,16,0)) && !defined(WITH_BACKPORTS)
         if (mmc_card_highspeed(card)) {
 #else
         if (mmc_card_hs(card)) {
@@ -1436,6 +1623,7 @@ HIFShutDownDevice(HIF_DEVICE *device)
     AR_DEBUG_PRINTF(ATH_DEBUG_TRACE, ("AR6000: -HIFShutDownDevice\n"));
 }
 
+#ifndef CONFIG_QCA_SDIO_OOB
 static void
 hifIRQHandler(struct sdio_func *func)
 {
@@ -1477,6 +1665,29 @@ static void hif_oob_irq_handler(void *dev_para)
 	AR_DEBUG_ASSERT(status == A_OK || status == A_ECANCELED);
 	AR_DEBUG_PRINTF(ATH_DEBUG_TRACE, ("AR6000: -hif_oob_irq_handler\n"));
 }
+#else
+#if HIF_DBG
+extern int printcnd;
+#endif
+static void hif_oob_handler(void *func)
+{
+    A_STATUS status;
+    HIF_DEVICE *device;
+
+    device = getHifDevice((struct sdio_func*)func);
+    atomic_set(&device->irqHandling, 1);
+    status = device->htcCallbacks.dsrHandler(device->htcCallbacks.context);
+    atomic_set(&device->irqHandling, 0);
+#if HIF_DBG
+    if(printcnd == 0) {
+#endif
+        AR_DEBUG_ASSERT(status == A_OK || status == A_ECANCELED);
+#if HIF_DBG
+    }
+#endif
+    AR_DEBUG_PRINTF(ATH_DEBUG_TRACE, ("AR6000: -hif_oob_handler\n"));
+}
+#endif
 
 #ifdef HIF_MBOX_SLEEP_WAR
 static void
@@ -1697,7 +1908,7 @@ TODO: MMC SDIO3.0 Setting should also be modified in ReInit() function when Powe
             if (mmcclock > 0){
                 clock_set = mmcclock;
             }
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,16,0))
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,16,0)) && !defined(WITH_BACKPORTS)
             if (mmc_card_highspeed(func->card)){
 #else
             if (mmc_card_hs(func->card)) {
@@ -1810,6 +2021,13 @@ TODO: MMC SDIO3.0 Setting should also be modified in ReInit() function when Powe
     adf_os_atomic_set(&device->mbox_state, HIF_MBOX_UNKNOWN_STATE);
 #endif
 
+#ifdef CONFIG_QCA_SDIO_OOB
+    sema_init(&device->sem_oob, 0);
+    device->oob_irq_num = -1;
+    device->oob_irq_handler = NULL;
+    device->oob_task = NULL;
+#endif
+
     ret = hifEnableFunc(device, func);
     if (ret == A_OK || ret == A_PENDING) {
         return 0;
@@ -1853,13 +2071,18 @@ HIFUnMaskInterrupt(HIF_DEVICE *device)
         /* disable IRQ support even the capability exists */
         device->func->card->host->caps &= ~MMC_CAP_SDIO_IRQ;
     }
+    else device->func->card->host->caps |= MMC_CAP_SDIO_IRQ;
     /* Register the IRQ Handler */
     sdio_claim_host(device->func);
+#ifndef CONFIG_QCA_SDIO_OOB
     if (false == vos_oob_enabled())
         ret = sdio_claim_irq(device->func, hifIRQHandler);
     else
         ret = vos_register_oob_irq_handler(hif_oob_irq_handler,
                                 device->func);
+#else
+    ret = 0;
+#endif
     sdio_release_host(device->func);
     AR_DEBUG_ASSERT(ret == 0);
     EXIT();
@@ -1995,7 +2218,11 @@ static A_STATUS hifDisableFunc(HIF_DEVICE *device, struct sdio_func *func)
 #endif
     /* Disable the card */
     sdio_claim_host(device->func);
+#ifdef CONFIG_QCA_SDIO_OOB
+    ret = wlan_unregister_oob_irq_handler(device->func);
+#else
     ret = sdio_disable_func(device->func);
+#endif
     if (ret) {
         status = A_ERROR;
     }
@@ -2030,7 +2257,7 @@ static A_STATUS hifDisableFunc(HIF_DEVICE *device, struct sdio_func *func)
 static A_STATUS hifEnableFunc(HIF_DEVICE *device, struct sdio_func *func)
 {
     int ret = A_OK;
-
+    struct sched_param param = {.sched_priority = 99};
     ENTER("sdio_func 0x%pK", func);
 
     AR_DEBUG_PRINTF(ATH_DEBUG_TRACE, ("AR6000: +hifEnableFunc\n"));
@@ -2135,6 +2362,9 @@ static A_STATUS hifEnableFunc(HIF_DEVICE *device, struct sdio_func *func)
         }
         device->is_disabled = FALSE;
         hif_start_tx_completion_thread(device);
+#ifdef CONFIG_QCA_SDIO_OOB
+        wlan_register_oob_irq_handler(device->func, hif_oob_handler);
+#endif
 
         /* create async I/O thread */
         if (!device->async_task) {
@@ -2142,6 +2372,7 @@ static A_STATUS hifEnableFunc(HIF_DEVICE *device, struct sdio_func *func)
             device->async_task = kthread_create(async_task,
                                            (void *)device,
                                            "AR6K Async");
+	   sched_setscheduler(device->async_task, SCHED_FIFO, &param);
            if (IS_ERR(device->async_task)) {
                AR_DEBUG_PRINTF(ATH_DEBUG_ERROR, ("AR6000: %s(), to create async task\n", __FUNCTION__));
                device->async_task = NULL;

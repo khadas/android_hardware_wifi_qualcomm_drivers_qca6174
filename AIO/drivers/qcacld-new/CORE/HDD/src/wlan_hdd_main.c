@@ -245,6 +245,151 @@ DEFINE_SPINLOCK(hdd_context_lock);
 
 /*Nss - 1, (Nss = 2 for 2x2)*/
 #define NUM_OF_SOUNDING_DIMENSIONS 1
+typedef char            A_CHAR;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,20)
+#define GET_INODE_FROM_FILEP(filp) \
+    (filp)->f_path.dentry->d_inode
+#else
+#define GET_INODE_FROM_FILEP(filp) \
+    (filp)->f_dentry->d_inode
+#endif
+#define A_ROUND_UP(x, y)  ((((x) + ((y) - 1)) / (y)) * (y))
+
+char qcafwpath[256] = "/system/etc/wifi/qca6174/";
+
+static int android_readwrite_file(const A_CHAR *filename, A_CHAR *rbuf, const A_CHAR *wbuf, size_t length)
+{
+    int ret = 0;
+    struct file *filp = (struct file *)-ENOENT;
+    mm_segment_t oldfs;
+    oldfs = get_fs();
+    set_fs(KERNEL_DS);
+
+    hddLog(VOS_TRACE_LEVEL_INFO, "%s: filename %s \n", __func__, filename);
+
+    do {
+        int mode = (wbuf) ? O_RDWR : O_RDONLY;
+        filp = filp_open(filename, mode, S_IRUSR);
+        if (IS_ERR(filp) || !filp->f_op) {
+    	    hddLog(VOS_TRACE_LEVEL_ERROR, "%s: filename %s \n", __func__, filename);
+            ret = -ENOENT;
+            break;
+        }
+
+        if (length==0) {
+            /* Read the length of the file only */
+            struct inode    *inode;
+
+            inode = GET_INODE_FROM_FILEP(filp);
+            if (!inode) {
+    	    	hddLog(VOS_TRACE_LEVEL_ERROR, "%s: Get inode from %s failed \n", __func__, filename);
+                ret = -ENOENT;
+                break;
+            }
+            ret = i_size_read(inode->i_mapping->host);
+            break;
+        }
+
+        if (wbuf) {
+           if ( (ret=filp->f_op->write(filp, wbuf, length, &filp->f_pos)) < 0) {
+                hddLog(VOS_TRACE_LEVEL_ERROR, "%s: Write %u bytes to file %s error %d\n", __FUNCTION__,
+                                (unsigned int)length, filename, ret);
+                break;
+            }
+        } else {
+            if ( (ret=filp->f_op->read(filp, rbuf, length, &filp->f_pos)) < 0) {
+                hddLog(VOS_TRACE_LEVEL_ERROR,"%s: Read %u bytes from file %s error %d\n", __FUNCTION__,
+                                (unsigned int)length, filename, ret);
+                break;
+            }
+        }
+    } while (0);
+
+    if (!IS_ERR(filp)) {
+        filp_close(filp, NULL);
+    }
+    set_fs(oldfs);
+
+    return ret;
+}
+
+
+int android_request_firmware(const struct firmware **firmware_p, const char *name,struct device *device)
+{
+    int ret = 0;
+    struct firmware *firmware;
+    char filename[256];
+    const char *raw_filename = name;
+    *firmware_p = firmware = A_MALLOC(sizeof(*firmware));
+    if (!firmware)
+        return -ENOMEM;
+    A_MEMZERO(firmware, sizeof(*firmware));
+    do {
+        size_t length, bufsize, bmisize;
+
+        if (snprintf(filename, sizeof(filename), "%s/%s", qcafwpath,
+                                raw_filename) >= sizeof(filename)) {
+            hddLog(VOS_TRACE_LEVEL_ERROR, "snprintf: %s/%s\n", qcafwpath, raw_filename);
+            ret = -1;
+            break;
+        }
+        if ( (ret=android_readwrite_file(filename, NULL, NULL, 0)) < 0) {
+            break;
+        } else {
+            length = ret;
+        }
+
+        if (strcmp(raw_filename, "softmac") == 0) {
+            bufsize = length = 17;
+        } else {
+            bufsize = ALIGN(length, PAGE_SIZE);
+            bmisize = A_ROUND_UP(length, 4);
+            bufsize = max(bmisize, bufsize);
+        }
+        firmware->data = vmalloc(bufsize);
+        firmware->size = length;
+
+        if (!firmware->data) {
+            hddLog(VOS_TRACE_LEVEL_ERROR, "%s: Cannot allocate buffer for firmware\n", __FUNCTION__);
+            ret = -ENOMEM;
+            break;
+        }
+
+        if ( (ret=android_readwrite_file(filename, (char*)firmware->data, NULL, length)) != length) {
+            hddLog(VOS_TRACE_LEVEL_ERROR, "%s: file read error, ret %d request %d\n", __FUNCTION__,ret,(int)length);
+            ret = -1;
+            break;
+        }
+
+    } while (0);
+
+    if (ret<0) {
+        if (firmware) {
+        if (firmware->data)
+                vfree(firmware->data);
+            A_FREE(firmware);
+        }
+        *firmware_p = NULL;
+    } else {
+        ret = 0;
+    }
+    return ret;
+}
+
+void android_release_firmware(const struct firmware *firmware)
+{
+    if (firmware) {
+        if (firmware->data)
+            vfree(firmware->data);
+        kfree(firmware);
+    }
+}
+
+int qca_request_firmware(const struct firmware **firmware_p,const char *name,struct device *device)
+{
+    return android_request_firmware(firmware_p, name,device);
+}
+
 
 /*
  * Android DRIVER command structures
@@ -10083,7 +10228,7 @@ VOS_STATUS hdd_get_cfg_file_size(v_VOID_t *pCtx, char *pFileName, v_SIZE_t *pBuf
 
    ENTER();
 
-   status = request_firmware(&pHddCtx->fw, pFileName, pHddCtx->parent_dev);
+   status = qca_request_firmware(&pHddCtx->fw, pFileName, pHddCtx->parent_dev);
 
    if(status || !pHddCtx->fw || !pHddCtx->fw->data) {
       hddLog(VOS_TRACE_LEVEL_FATAL,"%s: CFG download failed",__func__);
@@ -10124,7 +10269,7 @@ VOS_STATUS hdd_read_cfg_file(v_VOID_t *pCtx, char *pFileName,
 
    ENTER();
 
-   status = request_firmware(&pHddCtx->fw, pFileName, pHddCtx->parent_dev);
+   status = qca_request_firmware(&pHddCtx->fw, pFileName, pHddCtx->parent_dev);
 
    if(status || !pHddCtx->fw || !pHddCtx->fw->data) {
       hddLog(VOS_TRACE_LEVEL_FATAL,"%s: CFG download failed",__func__);
@@ -12268,8 +12413,7 @@ VOS_STATUS hdd_reset_all_adapters( hdd_context_t *pHddCtx )
  *
  * Return: bss structure if found else NULL
  */
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(4, 1, 0)) \
-	&& !defined(WITH_BACKPORTS) && !defined(IEEE80211_PRIVACY)
+#if 1 //(LINUX_VERSION_CODE < KERNEL_VERSION(4, 1, 0)) \ 	&& !defined(WITH_BACKPORTS) && !defined(IEEE80211_PRIVACY)
 struct cfg80211_bss *hdd_cfg80211_get_bss(struct wiphy *wiphy,
 	  struct ieee80211_channel *channel,
 	  const u8 *bssid, const u8 *ssid,
@@ -13987,6 +14131,10 @@ void hdd_wlan_exit(hdd_context_t *pHddCtx)
    }
 #endif
 
+#ifdef CONFIG_IXC_TIMER
+      vos_timer_stop(&pHddCtx->set_ixc_prio_timer);
+      vos_timer_destroy(&pHddCtx->set_ixc_prio_timer);
+#endif
 #ifdef FEATURE_WLAN_AP_AP_ACS_OPTIMIZE
    if (VOS_TIMER_STATE_RUNNING ==
                 vos_timer_getCurrentState(&pHddCtx->skip_acs_scan_timer)) {
@@ -14698,6 +14846,52 @@ static VOS_STATUS wlan_hdd_reg_init(hdd_context_t *hdd_ctx)
    return status;
 }
 
+#ifdef CONFIG_IXC_TIMER
+static void hdd_set_ixc_prio(void *priv)
+{
+    int i;
+    struct pid* pid;
+    struct task_struct* task;
+    char comm[16];
+    struct sched_param param = {.sched_priority = 99};
+    hdd_context_t *pHddCtx = (hdd_context_t *)priv;
+    if(pHddCtx->ixc_pid != 0) {
+        pid = find_get_pid(pHddCtx->ixc_pid);
+        if(pid) {
+            task = get_pid_task(pid, 0);
+            if(task){
+                memset(comm, 0, sizeof(comm));
+                strcpy(comm, task->comm);
+                if(strstr(comm, "ixchariot")) {
+                    vos_timer_start(&pHddCtx->set_ixc_prio_timer, 10);
+                    //we already set this task priority
+                    return;
+                }
+            }
+            task = NULL;
+        }
+    }
+    for(i = 2; i < 32767; i++) {
+        pid = find_get_pid(i);
+        if(pid) {
+            task = get_pid_task(pid, 0);
+            if(task){
+                memset(comm, 0, sizeof(comm));
+                strcpy(comm, task->comm);
+                if(strstr(comm, "ixchariot")) {
+                    sched_setscheduler(task, SCHED_FIFO, &param);
+                    pHddCtx->ixc_pid = i;
+                    printk("set ixc prio, pid is %d\n", pHddCtx->ixc_pid);
+                    vos_timer_start(&pHddCtx->set_ixc_prio_timer, 10);
+                    return;
+                }
+            }
+            task = NULL;
+        }
+    }
+    vos_timer_start(&pHddCtx->set_ixc_prio_timer, 10);
+}
+#endif
 #ifdef FEATURE_BUS_BANDWIDTH
 #ifdef QCA_SUPPORT_TXRX_HL_BUNDLE
 static void hdd_set_bundle_require(uint16_t session_id, hdd_context_t *hdd_ctx,
@@ -14819,6 +15013,8 @@ void hdd_cnss_request_bus_bandwidth(hdd_context_t *pHddCtx,
     pHddCtx->hdd_txrx_hist_idx &= NUM_TX_RX_HISTOGRAM_MASK;
 }
 
+extern char *tcp_rmem;
+extern int tcp_rmem_len;
 static void hdd_bus_bw_compute_cbk(void *priv)
 {
     hdd_context_t *pHddCtx = (hdd_context_t *)priv;
@@ -14876,6 +15072,16 @@ static void hdd_bus_bw_compute_cbk(void *priv)
                 pAdapter->prev_tx_bytes);
         rx_packets += HDD_BW_GET_DIFF(pAdapter->stats.rx_packets,
                 pAdapter->prev_rx_packets);
+
+        crash_dump_flush("/sys/bus/cpu/devices/cpu0/cpufreq/scaling_governor", "performance", 11);
+        crash_dump_flush("/sys/bus/cpu/devices/cpu1/cpufreq/scaling_governor", "performance", 11);
+        crash_dump_flush("/sys/bus/cpu/devices/cpu2/cpufreq/scaling_governor", "performance", 11);
+        crash_dump_flush("/sys/bus/cpu/devices/cpu3/cpufreq/scaling_governor", "performance", 11);
+
+        if(tcp_rmem) {
+            crash_dump_flush("/proc/sys/net/ipv4/tcp_rmem", tcp_rmem, tcp_rmem_len);
+            crash_dump_flush("/proc/sys/net/ipv4/tcp_wmem", tcp_rmem, tcp_rmem_len);
+        }
 
         if (pAdapter->device_mode == WLAN_HDD_SOFTAP ||
             pAdapter->device_mode == WLAN_HDD_P2P_GO ||
@@ -16613,6 +16819,14 @@ int hdd_wlan_startup(struct device *dev, v_VOID_t *hif_sc)
    vos_timer_init(&pHddCtx->tdls_source_timer, VOS_TIMER_TYPE_SW,
                   wlan_hdd_change_tdls_mode, (void *)pHddCtx);
 
+#ifdef CONFIG_IXC_TIMER
+   pHddCtx->ixc_pid = 0;
+   vos_timer_init(&pHddCtx->set_ixc_prio_timer,
+                     VOS_TIMER_TYPE_SW,
+                     hdd_set_ixc_prio,
+                     (void *)pHddCtx);
+   vos_timer_start(&pHddCtx->set_ixc_prio_timer, 10);
+#endif
 #ifdef FEATURE_BUS_BANDWIDTH
    spin_lock_init(&pHddCtx->bus_bw_lock);
    vos_timer_init(&pHddCtx->bus_bw_timer,
@@ -16620,6 +16834,7 @@ int hdd_wlan_startup(struct device *dev, v_VOID_t *hif_sc)
                      hdd_bus_bw_compute_cbk,
                      (void *)pHddCtx);
 #endif
+
 
 #ifdef WLAN_FEATURE_STATS_EXT
    wlan_hdd_cfg80211_stats_ext_init(pHddCtx);
@@ -17113,14 +17328,35 @@ static int hdd_driver_init( void)
   \return - 0 for success, non zero for failure
 
   --------------------------------------------------------------------------*/
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 14, 0))
+extern  int wifi_setup_dt(void);
+extern  void wifi_teardown_dt(void);
+#endif 
+extern  void extern_wifi_set_enable(int is_on);  
+extern  void sdio_reinit(void);
+
+
 #ifdef MODULE
 static int __init hdd_module_init ( void)
 {
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 14, 0))
+   wifi_setup_dt();
+#endif 
+   extern_wifi_set_enable(0);
+   mdelay(200);
+   extern_wifi_set_enable(1);
+   mdelay(200);
+   sdio_reinit();
+
    return hdd_driver_init();
 }
 #else /* #ifdef MODULE */
 static int __init hdd_module_init ( void)
 {
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3, 14, 0))
+   wifi_teardown_dt();
+#endif
+
    /* Driver initialization is delayed to fwpath_changed_handler */
    return 0;
 }

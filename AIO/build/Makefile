@@ -26,7 +26,7 @@ endif
 #################################################################################################################################
 export MAKEARCH=make ARCH=$(KERNELARCH) CROSS_COMPILE=$(TOOLPREFIX)
 
-export INSTALL_ROOT=${ATH_TOPDIR}/rootfs-$(BOARD_TYPE).build
+export INSTALL_ROOT=${ATH_TOPDIR}/rootfs-x86-android.build
 export ROOTFS_TOPDIR=${ATH_TOPDIR}/rootfs
 export WLAN_DRIVER_TOPDIR=${ATH_TOPDIR}/drivers
 export IW30_TOPDIR=${ATH_TOPDIR}/apps/iw-3.0
@@ -50,7 +50,7 @@ export FW_WLAN_NAME=qcacld-new
 export CFG80211_NAME=backports
 
 #################################################################################################################################
-clean: hostapd_clean wpa_supplicant_clean drivers_clean rootfs_clean
+clean: drivers_clean rootfs_clean
 
 #
 # rootfs build
@@ -106,7 +106,7 @@ drivers_firmware_transfer:
 
 drivers_clean:
 	@echo Clean drivers
-	cd ${WLAN_DRIVER_TOPDIR} && ${MAKEARCH} driver_clean
+	cd ${WLAN_DRIVER_TOPDIR} && ${MAKEARCH} clean
 
 common_patch: wpa_supplicant_patch
 	@echo Start Common Patches
