@@ -897,6 +897,9 @@ void hdd_wlan_get_version(hdd_adapter_t *pAdapter, union iwreq_data *wrqu,
     hdd_context_t *pHddContext;
     int i = 0;
 
+    struct wiphy *wiphy = NULL;
+    int j;
+
     pHddContext = WLAN_HDD_GET_CTX(pAdapter);
     if (!pHddContext) {
         VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
@@ -943,6 +946,18 @@ void hdd_wlan_get_version(hdd_adapter_t *pAdapter, union iwreq_data *wrqu,
                 CRMId,
                 pHWversion);
     }
+
+    wiphy = pHddContext->wiphy;
+    for (i = 0; i < IEEE80211_NUM_BANDS; i++) {
+        if (NULL == wiphy->bands[i])
+            continue;
+
+        for (j = 0; j < wiphy->bands[i]->n_channels; j++) {
+            struct ieee80211_supported_band *band = wiphy->bands[i];
+            printk("[CLD-REGDB-DEBUG]: channel %d flags 0x%x\n", band->channels[j].center_freq, band->channels[j].flags);
+        }
+    }
+
 error:
     return;
 }
