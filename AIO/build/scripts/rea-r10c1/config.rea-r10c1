@@ -53,8 +53,8 @@ else ifeq ($(IF_TYPE),USB)
 	export CONFIG_ROME_IF=usb
     export CONFIG_HIF_USB_TASKLET=1
 else ifeq ($(IF_TYPE),SDIO)
-	export CONFIG_CLD_HL_SDIO_CORE=y 
-	export CONFIG_LINUX_QCMBR=y 
+	export CONFIG_CLD_HL_SDIO_CORE=y
+	export CONFIG_LINUX_QCMBR=y
     export SAP_AUTH_OFFLOAD=1
     export CONFIG_PER_VDEV_TX_DESC_POOL=1
 else

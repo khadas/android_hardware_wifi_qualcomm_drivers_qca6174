@@ -25,6 +25,8 @@
 #ifndef _VOS_CNSS_H
 #define _VOS_CNSS_H
 
+#include <linux/pci.h>
+
 #include "vos_status.h"
 #ifdef CONFIG_CNSS
 #include <net/cnss.h>

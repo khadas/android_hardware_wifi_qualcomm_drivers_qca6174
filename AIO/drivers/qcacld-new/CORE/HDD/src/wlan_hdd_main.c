@@ -255,125 +255,113 @@ typedef char            A_CHAR;
 #endif
 #define A_ROUND_UP(x, y)  ((((x) + ((y) - 1)) / (y)) * (y))
 
-char qcafwpath[256] = "/system/etc/wifi/qca6174/";
+char qcafwpath[256] = "/vendor/etc/wifi/qca6174";
 
 static int android_readwrite_file(const A_CHAR *filename, A_CHAR *rbuf, const A_CHAR *wbuf, size_t length)
 {
-    int ret = 0;
-    struct file *filp = (struct file *)-ENOENT;
-    mm_segment_t oldfs;
-    oldfs = get_fs();
-    set_fs(KERNEL_DS);
+	int ret = 0;
+	struct file *filp = (struct file *)-ENOENT;
+	loff_t pos=0;
+	mm_segment_t oldfs;
 
-    hddLog(VOS_TRACE_LEVEL_INFO, "%s: filename %s \n", __func__, filename);
+	oldfs = get_fs();
+	set_fs(KERNEL_DS);
 
-    do {
-        int mode = (wbuf) ? O_RDWR : O_RDONLY;
-        filp = filp_open(filename, mode, S_IRUSR);
-        if (IS_ERR(filp) || !filp->f_op) {
-    	    hddLog(VOS_TRACE_LEVEL_ERROR, "%s: filename %s \n", __func__, filename);
-            ret = -ENOENT;
-            break;
-        }
+	if(filename == NULL)
+		return 0;
 
-        if (length==0) {
-            /* Read the length of the file only */
-            struct inode    *inode;
+	do {
+		int mode = (wbuf) ? O_RDWR : O_RDONLY;
+		filp = filp_open(filename, mode, S_IRUSR);
+		if (IS_ERR(filp) || !filp->f_op) {
+			hddLog(VOS_TRACE_LEVEL_ERROR, "%s: filename %s \n", __func__, filename);
+			ret = -ENOENT;
+			break;
+		}
+		if (length==0) {
+			/* Read the length of the file only */
+			struct inode *inode;
+			inode = GET_INODE_FROM_FILEP(filp);
+			if (!inode) {
+				hddLog(VOS_TRACE_LEVEL_ERROR, "%s: Get inode from %s failed \n", __func__, filename);
+				ret = -ENOENT;
+				break;
+			}
+			ret = i_size_read(inode->i_mapping->host);
+			break;
+		}
+		vfs_read(filp,rbuf, length, &pos);
+	} while (0);
 
-            inode = GET_INODE_FROM_FILEP(filp);
-            if (!inode) {
-    	    	hddLog(VOS_TRACE_LEVEL_ERROR, "%s: Get inode from %s failed \n", __func__, filename);
-                ret = -ENOENT;
-                break;
-            }
-            ret = i_size_read(inode->i_mapping->host);
-            break;
-        }
+	if (!IS_ERR(filp)) {
+		filp_close(filp, NULL);
+	}
+	set_fs(oldfs);
 
-        if (wbuf) {
-           if ( (ret=filp->f_op->write(filp, wbuf, length, &filp->f_pos)) < 0) {
-                hddLog(VOS_TRACE_LEVEL_ERROR, "%s: Write %u bytes to file %s error %d\n", __FUNCTION__,
-                                (unsigned int)length, filename, ret);
-                break;
-            }
-        } else {
-            if ( (ret=filp->f_op->read(filp, rbuf, length, &filp->f_pos)) < 0) {
-                hddLog(VOS_TRACE_LEVEL_ERROR,"%s: Read %u bytes from file %s error %d\n", __FUNCTION__,
-                                (unsigned int)length, filename, ret);
-                break;
-            }
-        }
-    } while (0);
-
-    if (!IS_ERR(filp)) {
-        filp_close(filp, NULL);
-    }
-    set_fs(oldfs);
-
-    return ret;
+	return ret;
 }
 
 
 int android_request_firmware(const struct firmware **firmware_p, const char *name,struct device *device)
 {
-    int ret = 0;
-    struct firmware *firmware;
-    char filename[256];
-    const char *raw_filename = name;
-    *firmware_p = firmware = A_MALLOC(sizeof(*firmware));
-    if (!firmware)
-        return -ENOMEM;
-    A_MEMZERO(firmware, sizeof(*firmware));
-    do {
-        size_t length, bufsize, bmisize;
+	int ret = 0;
+	struct firmware *firmware;
+	char filename[256];
+	const char *raw_filename = name;
 
-        if (snprintf(filename, sizeof(filename), "%s/%s", qcafwpath,
-                                raw_filename) >= sizeof(filename)) {
-            hddLog(VOS_TRACE_LEVEL_ERROR, "snprintf: %s/%s\n", qcafwpath, raw_filename);
-            ret = -1;
-            break;
-        }
-        if ( (ret=android_readwrite_file(filename, NULL, NULL, 0)) < 0) {
-            break;
-        } else {
-            length = ret;
-        }
+	*firmware_p = firmware = A_MALLOC(sizeof(*firmware));
 
-        if (strcmp(raw_filename, "softmac") == 0) {
-            bufsize = length = 17;
-        } else {
-            bufsize = ALIGN(length, PAGE_SIZE);
-            bmisize = A_ROUND_UP(length, 4);
-            bufsize = max(bmisize, bufsize);
-        }
-        firmware->data = vmalloc(bufsize);
-        firmware->size = length;
+	if (!firmware)
+		return -ENOMEM;
 
-        if (!firmware->data) {
-            hddLog(VOS_TRACE_LEVEL_ERROR, "%s: Cannot allocate buffer for firmware\n", __FUNCTION__);
-            ret = -ENOMEM;
-            break;
-        }
+	A_MEMZERO(firmware, sizeof(*firmware));
 
-        if ( (ret=android_readwrite_file(filename, (char*)firmware->data, NULL, length)) != length) {
-            hddLog(VOS_TRACE_LEVEL_ERROR, "%s: file read error, ret %d request %d\n", __FUNCTION__,ret,(int)length);
-            ret = -1;
-            break;
-        }
+	do {
+		size_t length, bufsize, bmisize;
 
-    } while (0);
+		if (snprintf(filename, sizeof(filename), "%s/%s", qcafwpath,
+			raw_filename) >= sizeof(filename)) {
+			hddLog(VOS_TRACE_LEVEL_ERROR, "snprintf: %s/%s\n", qcafwpath, raw_filename);
+			ret = -1;
+			break;
+		}
 
-    if (ret<0) {
-        if (firmware) {
-        if (firmware->data)
-                vfree(firmware->data);
-            A_FREE(firmware);
-        }
-        *firmware_p = NULL;
-    } else {
-        ret = 0;
-    }
-    return ret;
+		if ( (ret=android_readwrite_file(filename, NULL, NULL, 0)) < 0) {
+			break;
+		} else {
+			length = ret;
+		}
+
+		bufsize = ALIGN(length, PAGE_SIZE);
+		bmisize = A_ROUND_UP(length, 4);
+		bufsize = max(bmisize, bufsize);
+		firmware->data = vmalloc(bufsize);
+		firmware->size = length;
+
+		if (!firmware->data) {
+			hddLog(VOS_TRACE_LEVEL_ERROR, "%s: Cannot allocate buffer for firmware\n", __FUNCTION__);
+			ret = -ENOMEM;
+			break;
+		}
+
+		if ( (ret=android_readwrite_file(filename, (char*)firmware->data, NULL, length)) != length) {
+			hddLog(VOS_TRACE_LEVEL_ERROR, "%s: file read error, ret %d request %d\n", __FUNCTION__,ret,(int)length);
+			break;
+		}
+	} while (0);
+
+	if (ret<0) {
+		if (firmware) {
+			if (firmware->data)
+				vfree(firmware->data);
+			A_FREE(firmware);
+		}
+		*firmware_p = NULL;
+	} else {
+		ret = 0;
+	}
+
+	return ret;
 }
 
 void android_release_firmware(const struct firmware *firmware)
@@ -17578,7 +17566,7 @@ static void __exit hdd_module_exit(void)
 
 #ifdef MODULE
 static int fwpath_changed_handler(const char *kmessage,
-                                 struct kernel_param *kp)
+                                 const struct kernel_param *kp)
 {
    return param_set_copystring(kmessage, kp);
 }

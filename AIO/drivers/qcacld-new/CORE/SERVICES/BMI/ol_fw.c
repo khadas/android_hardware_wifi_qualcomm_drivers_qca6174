@@ -2811,7 +2811,7 @@ void crash_dump_flush(const char* filename, char* buf, unsigned int len)
 	                      len,
 	                      (O_WRONLY | O_APPEND));
 	if (ret < 0) {
-		printk("%s:%d: fail to write\n", __func__, __LINE__);
+//		printk("%s:%d: fail to write\n", __func__, __LINE__);
 	}
 }
 

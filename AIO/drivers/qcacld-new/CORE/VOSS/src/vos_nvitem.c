@@ -54,6 +54,7 @@
 #include "regdomain_common.h"
 #include "vos_cnss.h"
 #include "vos_regdb.h"
+#include <net/regulatory.h>
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(3,9,0)) && !defined(WITH_BACKPORTS)
 #define IEEE80211_CHAN_NO_80MHZ		1<<7
@@ -1683,10 +1684,12 @@ VOS_STATUS vos_nv_getRegDomainFromCountryCode( v_REGDOMAIN_t *pRegDomain,
             vos_set_cc_source(CNSS_SOURCE_11D);
 
         INIT_COMPLETION(pHddCtx->reg_init);
+#if 0
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3,9,0)) || defined(WITH_BACKPORTS)
         regulatory_hint_user(country_code, NL80211_USER_REG_HINT_USER);
 #else
         regulatory_hint_user(country_code);
+#endif
 #endif
         wait_result = wait_for_completion_interruptible_timeout(
                                &pHddCtx->reg_init,

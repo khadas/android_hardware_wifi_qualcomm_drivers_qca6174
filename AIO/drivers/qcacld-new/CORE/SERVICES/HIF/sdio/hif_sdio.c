@@ -155,5 +155,5 @@ void HIFDump(HIF_DEVICE *hif_device, u_int8_t cmd_id, bool start) {
 
 void HIFSetBundleMode(HIF_DEVICE *hif_device, bool enabled, int rx_bundle_cnt)
 {
-
+       return;
 }

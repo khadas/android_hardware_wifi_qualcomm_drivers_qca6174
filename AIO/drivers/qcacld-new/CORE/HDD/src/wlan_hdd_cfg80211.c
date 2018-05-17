@@ -1409,7 +1409,8 @@ static int __is_driver_dfs_capable(struct wiphy *wiphy,
 
 #if (LINUX_VERSION_CODE > KERNEL_VERSION(3,4,0)) || \
     defined (DFS_MASTER_OFFLOAD_IND_SUPPORT) || defined(WITH_BACKPORTS)
-    dfs_capability = !!(wiphy->flags & WIPHY_FLAG_DFS_OFFLOAD);
+//    dfs_capability = !!(wiphy->flags & WIPHY_FLAG_DFS_OFFLOAD);
+	dfs_capability = !!(wiphy->flags & BIT(24));
 #endif
 
     temp_skbuff = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, sizeof(u32) +
@@ -15513,7 +15514,8 @@ int wlan_hdd_cfg80211_init(struct device *dev,
 #if (LINUX_VERSION_CODE > KERNEL_VERSION(3,4,0)) || \
     defined (DFS_MASTER_OFFLOAD_IND_SUPPORT) || defined(WITH_BACKPORTS)
     if (pCfg->enableDFSMasterCap) {
-        wiphy->flags |= WIPHY_FLAG_DFS_OFFLOAD;
+//        wiphy->flags |= WIPHY_FLAG_DFS_OFFLOAD;
+	wiphy->flags |= BIT(24);
     }
 #endif
 
