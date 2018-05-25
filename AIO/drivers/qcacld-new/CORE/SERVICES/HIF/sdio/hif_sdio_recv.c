@@ -1089,6 +1089,7 @@ int rx_completion_task(void *param)
         printk("[task]task break\n");
 #endif
     }
+        printk("in_atomic(): %d, irqs_disabled(): %d, pid: %d, name: %s\n",in_atomic(), irqs_disabled(),current->pid, current->comm);
     complete_and_exit(&device->pRecvTask->rx_completion_exit, 0);
     return 0;
 }

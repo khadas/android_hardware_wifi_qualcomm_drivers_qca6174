@@ -1016,6 +1016,8 @@ static int tx_completion_task(void *param)
 	while (device->tx_completion_req != NULL)
 		tx_clean_completion_list(device);
 
+	printk("in_atomic(): %d, irqs_disabled(): %d, pid: %d, name: %s\n",in_atomic(), irqs_disabled(),current->pid, current->comm);
+
 	complete_and_exit(&device->tx_completion_exit, 0);
 	return 0;
 }
