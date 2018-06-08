@@ -872,6 +872,7 @@ int rx_completion_task(void *param)
     HIF_SDIO_DEVICE *device;
     HTC_PACKET *pPacket = NULL;
     unsigned long flags;
+    unsigned long flags_rx;
 #if HIF_RX_THREAD_V2
     HTC_PACKET *pPacketRxBundle;
     A_UINT32 paddedLength;
@@ -915,7 +916,7 @@ int rx_completion_task(void *param)
 #if HIF_DBG
         printk("[task]task enter\n");
 #endif
-        spin_lock_irqsave(&device->pRecvTask->rx_bundle_lock, flags);
+        spin_lock_irqsave(&device->pRecvTask->rx_bundle_lock, flags_rx);
         if(HTC_QUEUE_EMPTY(&device->pRecvTask->rxBundleQueue)) {
             spin_lock_irqsave(&device->pRecvTask->rx_sync_completion_lock, flags);
             while(!HTC_QUEUE_EMPTY(&device->pRecvTask->rxSyncCompletionQueue)) {
@@ -1055,7 +1056,7 @@ int rx_completion_task(void *param)
                 FreeHTCBundleRxPacket(target, pPacketRxBundle);
             }
         }
-        spin_unlock_irqrestore(&device->pRecvTask->rx_bundle_lock, flags);
+        spin_unlock_irqrestore(&device->pRecvTask->rx_bundle_lock, flags_rx);
 #else
         spin_lock_irqsave(&device->pRecvTask->rx_completion_lock, flags);
         while(!HTC_QUEUE_EMPTY(&device->pRecvTask->rxComQueue)) {
