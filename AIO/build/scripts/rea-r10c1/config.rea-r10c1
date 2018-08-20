@@ -12,8 +12,8 @@
 export ANDROID_X86_PROJ_PATH=/work/zfding/android-x86-m/android-x86-m
 export KERNELPATH=${ANDROID_X86_PROJ_PATH}/out/target/product/x86/obj/kernel
 export TOOLCHAIN=${ANDROID_X86_PROJ_PATH}/prebuilts/gcc/linux-x86/x86/x86_64-linux-android-4.9/bin
-export KERNELARCH=arm64
-export CROSS_COMPILE=aarch64-linux-gnu-
+export KERNELARCH=$(ARCH)
+export CROSS_COMPILE=$(CROSS_COMPILE)
 export TOOLPREFIX=${CROSS_COMPILE}
 #export ANDROID_BSP_VERSION=<rome-usb-ax86-kk, rome-usb-ax86-l, tf-sdio-ax86-kk>
 
