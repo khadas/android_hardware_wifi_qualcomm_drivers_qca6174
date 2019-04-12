@@ -20329,6 +20329,7 @@ wlan_hdd_cfg80211_inform_bss_frame_data(struct wiphy *wiphy,
 		uint64_t boottime_ns)
 {
 	struct cfg80211_bss *bss_status  = NULL;
+#if 0
 	struct cfg80211_inform_bss data  = {0};
 
 	data.chan = chan;
@@ -20336,6 +20337,10 @@ wlan_hdd_cfg80211_inform_bss_frame_data(struct wiphy *wiphy,
 	data.signal = rssi;
 	bss_status = cfg80211_inform_bss_frame_data(wiphy, &data, mgmt,
 						    frame_len, gfp);
+#else
+	bss_status = cfg80211_inform_bss_frame(wiphy, chan, mgmt, frame_len,
+						                  rssi, gfp);
+#endif
 	return bss_status;
 }
 #else
