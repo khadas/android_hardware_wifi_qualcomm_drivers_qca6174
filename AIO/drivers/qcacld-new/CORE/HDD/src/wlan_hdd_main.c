@@ -331,7 +331,6 @@ int android_request_firmware(const struct firmware **firmware_p, const char *nam
 		} else {
 			length = ret;
 		}
-
 		bufsize = ALIGN(length, PAGE_SIZE);
 		bmisize = A_ROUND_UP(length, 4);
 		bufsize = max(bmisize, bufsize);
@@ -375,7 +374,13 @@ void android_release_firmware(const struct firmware *firmware)
 
 int qca_request_firmware(const struct firmware **firmware_p,const char *name,struct device *device)
 {
-    return android_request_firmware(firmware_p, name,device);
+#if 1
+	char final_name[512];
+	sprintf(final_name,"../../../vendor/etc/wifi/qca6174/%s",name);
+	return request_firmware(firmware_p, final_name, device);
+#else
+	return android_request_firmware(firmware_p, name,device);
+#endif
 }
 
 
