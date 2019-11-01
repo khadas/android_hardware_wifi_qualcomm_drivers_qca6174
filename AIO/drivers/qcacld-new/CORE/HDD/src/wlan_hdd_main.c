@@ -376,7 +376,11 @@ int qca_request_firmware(const struct firmware **firmware_p,const char *name,str
 {
 #if 1
 	char final_name[512];
+#ifdef CONFIG_BUILDROOT
+	sprintf(final_name,"qca6174/%s",name);
+#else
 	sprintf(final_name,"../../../vendor/etc/wifi/qca6174/%s",name);
+#endif
 	return request_firmware(firmware_p, final_name, device);
 #else
 	return android_request_firmware(firmware_p, name,device);
